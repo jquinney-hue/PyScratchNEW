@@ -26,7 +26,15 @@ let pressedKeys       = {};
 let mouse             = { x: 0, y: 0, down: false };
 let displayedVars     = {};
 let libraryCallback   = null;
-let activeEditorSprId = null; // which sprite the editor is showing
+let replacingCostumeIndex = null;
+
+// NEW: Virtual File System
+let virtualFiles      = {
+    "utils.py": "def test():\n    print('Import successful!')\n"
+};
+let openFileTabs      = ["utils.py"]; // Which files are currently in the top bar
+let activeEditorFile  = null; // If null, we are editing a Sprite. If string, we are editing a .py file.
+let activeEditorSprId = null;
 
 // ─── Skull runtime handles ───
 let skulptRunners = []; // list of { sprite, cancel } so we can stop them
@@ -52,7 +60,7 @@ class Sprite {
       ? [{ name: 'Backdrop1', url: URLS.DEFAULT_STAGE }]
       : [{ name: 'Costume1',  url: URLS.DEFAULT_SPRITE }];
     this.currentCostumeIdx = 0;
-    this.code        = isStage ? '# Stage code\n' : 'from pyscratch import *\n\ndef game_start():\n    pass\n';
+    this.code        = isStage ? '# Stage code\n' : 'from pyscratch import *\n\n';
     this.speechBubble = { text: null };
     this.imgCache    = {};
     this._listeners  = { onClick: [], onKey: [], onMessage: [] };
@@ -449,10 +457,9 @@ function buildPyScratchModule(sprite) {
 let _pyscratchCurrentSprite = null;
 
 function read(fname) {
-  if (fname === 'pyscratch.js' || fname === 'src/lib/pyscratch.js') {
-    // This JS source is eval'd by Skulpt. It must define $builtinmodule.
-    // We reach back to the JS variable set just before Sk.configure().
-    return `
+    // 1. Resolve PyScratch API
+    if (fname === 'pyscratch.js' || fname === 'src/lib/pyscratch.js') {
+        return `
 var $builtinmodule = function(name) {
   var d = Sk.__pyscratch_api__;
   d['__name__'] = new Sk.builtin.str('pyscratch');
@@ -463,11 +470,25 @@ var $builtinmodule = function(name) {
   return d;
 };
 `;
-  }
-  if (Sk.builtinFiles && Sk.builtinFiles.files && Sk.builtinFiles.files[fname]) {
-    return Sk.builtinFiles.files[fname];
-  }
-  throw new Error('File not found: ' + fname);
+    }
+
+    // 2. Resolve Global Custom Files exactly as typed
+    if (virtualFiles[fname] !== undefined) {
+        return virtualFiles[fname];
+    }
+
+    // 3. Skulpt quirk: strip 'src/lib/' and try again!
+    const strippedName = fname.replace(/^src\/lib\//, '');
+    if (virtualFiles[strippedName] !== undefined) {
+        return virtualFiles[strippedName];
+    }
+
+    // 4. Resolve standard Python libraries
+    if (Sk.builtinFiles && Sk.builtinFiles.files && Sk.builtinFiles.files[fname]) {
+        return Sk.builtinFiles.files[fname];
+    }
+    
+    throw new Error('File not found: ' + fname);
 }
 
 function runSpriteCode(sprite) {
@@ -492,16 +513,7 @@ function runSpriteCode(sprite) {
     },
   });
 
-  // Auto-prepend import — strip any existing one first to avoid double-import
-  const userCode = sprite.code.replace(/^\s*from\s+pyscratch\s+import\s+\*\s*\n?/gm, '');
-  const codeToRun = 'from pyscratch import *\n' + userCode;
-
   // ── Frame-pacing suspension handlers ──────────────────────────
-  // asyncToPromise accepts a suspHandlers map. Sk.delay and Sk.yield are
-  // what killableWhile/killableFor inject on every loop iteration.
-  // By default Skulpt resumes them via setImmediate (immediately).
-  // We override them to wait for the next animation frame instead,
-  // which caps any while/for loop to 60fps and checks isRunning for stop.
   const frameSuspHandlers = {
     'Sk.delay': (susp) => new Promise((resolve, reject) => {
       requestAnimationFrame(() => {
@@ -517,8 +529,9 @@ function runSpriteCode(sprite) {
     }),
   };
 
+  // Run the raw sprite code exactly as the user typed it
   const prog = Sk.misceval.asyncToPromise(() =>
-    Sk.importMainWithBody('<stdin>', false, codeToRun, true),
+    Sk.importMainWithBody('<stdin>', false, sprite.code, true),
     frameSuspHandlers
   );
 
@@ -893,66 +906,46 @@ function updateVarDisplay() {
   }
 }
 
-function renderEditorTabs() {
-  const tabs = document.getElementById('sprite-tabs');
-  tabs.innerHTML = '';
-  const all = [stage, ...sprites];
-  all.forEach(s => {
-    const t = document.createElement('div');
-    t.className = 'sprite-tab' + (s.id === activeEditorSprId ? ' active' : '');
-    t.textContent = s.name;
-    t.onclick = () => { activeEditorSprId = s.id; loadEditorForSprite(s); renderEditorTabs(); };
-    tabs.appendChild(t);
-  });
-  const add = document.createElement('div');
-  add.className = 'sprite-tab add-tab';
-  add.innerHTML = '<i class="fa-solid fa-plus"></i>';
-  add.onclick = createNewSprite;
-  tabs.appendChild(add);
-}
-
 function loadEditorForSprite(s) {
   document.getElementById('code-editor').value = s.code || '';
   document.getElementById('editor-filename').textContent = (s.isStage ? 'stage' : s.name.toLowerCase().replace(/\s+/g,'_')) + '.py';
 }
 
 function renderSpriteList() {
-  const list = document.getElementById('sprite-list');
-  list.innerHTML = '';
-  [stage, ...sprites].forEach(s => {
-    const card = document.createElement('div');
-    card.className = 'spr-card' + (currentSelection === s.id ? ' selected' : '');
-    if (!s.isStage) {
-      const img = document.createElement('img');
-      img.src = s.currentCostume?.url || '';
-      img.id = 'thumb-' + s.id;
-      card.appendChild(img);
-    } else {
-      const ico = document.createElement('i');
-      ico.className = 'fa-solid fa-image';
-      ico.style.fontSize = '24px'; ico.style.color = 'var(--c-muted)';
-      card.appendChild(ico);
-    }
-    const nm = document.createElement('div');
-    nm.className = 'spr-name';
-    nm.textContent = s.name;
-    card.appendChild(nm);
-    if (!s.isStage) {
-      const del = document.createElement('button');
-      del.className = 'spr-del';
-      del.innerHTML = '×';
-      del.onclick = e => { e.stopPropagation(); deleteSprite(s.id); };
-      card.appendChild(del);
-    }
-    card.onclick = () => selectSprite(s.id);
-    list.appendChild(card);
-  });
-  // Add button
-  const add = document.createElement('div');
-  add.className = 'spr-card spr-add';
-  add.innerHTML = '<i class="fa-solid fa-plus"></i>';
-  add.onclick = createNewSprite;
-  list.appendChild(add);
+    const list = document.getElementById('sprite-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    // Render Stage and Sprites
+    const all = [stage, ...sprites];
+    all.forEach(s => {
+        const el = document.createElement('div');
+        // Add visual indicator if it's the currently selected sprite (and we aren't viewing a global file)
+        const isSelected = (s.id === currentSelection && !activeEditorFile);
+        
+        el.className = `flex flex-col items-center justify-center w-16 h-16 rounded cursor-pointer border-2 shrink-0 overflow-hidden ${
+            isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+        }`;
+        
+        // Grab the costume URL (fallback to empty string if not loaded yet)
+        const costumeUrl = s.currentCostume ? s.currentCostume.url : '';
+
+        // Added the <img> tag back in here!
+        el.innerHTML = `
+            <img src="${costumeUrl}" class="w-8 h-8 object-contain mb-1 drop-shadow-sm" crossorigin="anonymous" onerror="this.style.display='none'">
+            <div class="text-[10px] truncate w-full text-center font-bold text-gray-700 px-1" title="${s.name}">${s.name}</div>
+        `;
+        
+        el.onclick = () => selectSprite(s.id);
+        list.appendChild(el);
+    });
+
+    // ADD SPRITE BUTTON
+    const addBtn = document.createElement('div');
+    addBtn.className = 'flex flex-col items-center justify-center w-16 h-16 rounded cursor-pointer border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-indigo-50 hover:border-indigo-400 hover:text-indigo-600 transition shrink-0 text-gray-400';
+    addBtn.innerHTML = '<i class="fa-solid fa-plus text-xl mb-1"></i><span class="text-[10px] font-bold">New</span>';
+    addBtn.onclick = createNewSprite;
+    list.appendChild(addBtn);
 }
 
 function renderCostumes() {
@@ -963,11 +956,18 @@ function renderCostumes() {
   s.costumes.forEach((c, i) => {
     const card = document.createElement('div');
     card.className = 'cos-card' + (i === s.currentCostumeIdx ? ' selected' : '');
+    
+    // We add a wrapper div around the icons so they sit nicely next to each other
     card.innerHTML = `
       <img src="${c.url}">
       <span class="cos-name">${c.name}</span>
-      <i class="fa-solid fa-trash cos-del" onclick="removeCostume(${i}, event)"></i>
+      <div style="margin-left: auto; display: flex; gap: 12px; align-items: center; padding-right: 8px;">
+          <i class="fa-solid fa-pen" style="color: #6366f1; cursor: pointer;" onclick="event.stopPropagation(); openLibraryForAdd('costume', ${i})" title="Change Costume"></i>
+          
+          <i class="fa-solid fa-trash cos-del" style="cursor: pointer;" onclick="removeCostume(${i}, event)" title="Delete Costume"></i>
+      </div>
     `;
+    
     card.onclick = () => { s.currentCostumeIdx = i; renderCostumes(); updateSpriteThumbnail(s); };
     section.appendChild(card);
   });
@@ -981,11 +981,50 @@ function switchRightTab(tab) {
   if (tab === 'costumes') renderCostumes();
 }
 
+// ─── Unified Editor & Selection Management ───
+
 function selectSprite(id) {
-  currentSelection = id;
-  renderSpriteList();
-  updatePropBar();
-  renderCostumes();
+    // 1. Save whatever code we were just working on
+    saveCurrentEditorCode();
+
+    // 2. Update global state
+    currentSelection = id;
+    activeEditorSprId = id;
+    activeEditorFile = null; // We are editing a sprite, so no file is active
+
+    // 3. Find the sprite and load it
+    const s = id === 'stage' ? stage : sprites.find(x => x.id === id);
+    if (s) {
+        loadEditorForSprite(s);
+    }
+
+    // 4. Update all UI elements
+    updatePropBar();
+    renderSpriteList();
+    renderFileTabs();
+}
+
+function loadEditorForSprite(s) {
+    const editor = document.getElementById('code-editor');
+    if (editor) {
+        editor.value = s.code || '';
+    }
+    updateEditorHeader();
+}
+
+function updateEditorHeader() {
+    // Look for an element that shows the title (you might need to add id="editor-title" to your HTML if you don't have it)
+    const titleEl = document.getElementById('editor-title'); 
+    if (!titleEl) return;
+
+    if (activeEditorFile) {
+        titleEl.innerHTML = `<i class="fa-brands fa-python text-blue-500 mr-2"></i> ${activeEditorFile}`;
+    } else if (activeEditorSprId) {
+        const s = activeEditorSprId === 'stage' ? stage : sprites.find(x => x.id === activeEditorSprId);
+        if (s) {
+            titleEl.innerHTML = `<i class="fa-solid ${s.isStage ? 'fa-image' : 'fa-ghost'} text-indigo-500 mr-2"></i> ${s.name}`;
+        }
+    }
 }
 
 function getSelectedSprite() {
@@ -1010,37 +1049,45 @@ function updatePropBar() {
   });
 }
 
-function updateSpriteProp(prop, val) {
-  const s = getSelectedSprite();
-  if (!s || s.isStage) return;
-  if (prop === 'name')          { s.name = val; renderSpriteList(); renderEditorTabs(); }
-  else if (prop === 'rotationStyle') s.rotationStyle = val;
-  else s[prop] = parseFloat(val);
-  if (prop === 'direction') {
-    document.getElementById('angle-picker-line').style.transform = `rotate(${s.direction - 90}deg)`;
-    document.getElementById('dir-display').textContent = Math.round(s.direction) + '°';
-  }
+function updateSpriteProp(prop, value) {
+    const s = currentSelection === 'stage' ? stage : sprites.find(x => x.id === currentSelection);
+    if (!s) return;
+
+    if (prop === 'name') s.name = value;
+    if (prop === 'x') s.x = parseFloat(value) || 0;
+    if (prop === 'y') s.y = parseFloat(value) || 0;
+    if (prop === 'size') s.size = parseFloat(value) || 100;
+    if (prop === 'direction') s.direction = parseFloat(value) || 90;
+    if (prop === 'rotationStyle') s.rotationStyle = value;
+
+    // Refresh UI elements to reflect the new data immediately
+    renderSpriteList();
+    updateEditorHeader(); // <--- ADD THIS
 }
 
 function createNewSprite() {
-  const s = new Sprite('Sprite' + (sprites.length + 1));
-  sprites.push(s);
-  selectSprite(s.id);
-  activeEditorSprId = s.id;
-  loadEditorForSprite(s);
-  renderEditorTabs();
+    saveCurrentEditorCode(); // ALWAYS save first
+    
+    // Create new sprite logic...
+    const s = new Sprite('Sprite' + (sprites.length + 1));
+    sprites.push(s);
+    
+    // Automatically select the newly created sprite
+    selectSprite(s.id); 
 }
 
 function deleteSprite(id) {
-  showCustomConfirm('Delete this sprite?', () => {
+    if (id === 'stage') return; // Can't delete stage
+    
     sprites = sprites.filter(s => s.id !== id);
-    if (currentSelection === id) selectSprite('stage');
-    if (activeEditorSprId === id) {
-      activeEditorSprId = 'stage';
-      loadEditorForSprite(stage);
+    
+    // If the sprite we just deleted was the one we were editing, fallback to Stage
+    if (activeEditorSprId === id || currentSelection === id) {
+        selectSprite('stage');
+    } else {
+        // Otherwise just refresh the list
+        renderSpriteList();
     }
-    renderEditorTabs();
-  });
 }
 
 function updateSpriteThumbnail(s) {
@@ -1049,13 +1096,29 @@ function updateSpriteThumbnail(s) {
 }
 
 // ─── Costumes ───
-function openLibraryForAdd() {
-  document.getElementById('library-title').textContent = 'Add Costume from Library';
+function openLibraryForAdd(type, indexToReplace = null) { // <-- Added it here!
+  replacingCostumeIndex = indexToReplace;
+  
+  // Optional: Change the title of the modal so the user knows they are changing it
+  document.getElementById('library-title').textContent = indexToReplace !== null ? 'Change Costume' : 'Add Costume from Library';
+  
   libraryCallback = (url) => {
     const s = getSelectedSprite();
-    s.costumes.push({ name: 'Costume ' + (s.costumes.length + 1), url });
+    
+    if (replacingCostumeIndex !== null) {
+        // ─── REPLACING EXISTING COSTUME ───
+        s.costumes[replacingCostumeIndex].url = url;
+        replacingCostumeIndex = null; // Reset it for next time
+    } else {
+        // ─── ADDING NEW COSTUME ───
+        s.costumes.push({ name: 'Costume ' + (s.costumes.length + 1), url });
+    }
+    
     renderCostumes();
+    // It's a good idea to update the thumbnail too, just in case they replaced the active costume!
+    if (typeof updateSpriteThumbnail === 'function') updateSpriteThumbnail(s); 
   };
+  
   populateLibraryGrid();
   document.getElementById('library-modal').classList.remove('hidden');
 }
@@ -1127,49 +1190,189 @@ function stopAll() {
 }
 
 function startAll() {
-  stopAll();
-  consoleLog('─── Starting ───', 'info');
-  displayedVars = {};
-  updateVarDisplay();
-  pressedKeys = {};
+    // 1. ALWAYS save the code we are currently typing before running!
+    saveCurrentEditorCode(); 
 
-  setTimeout(() => {
-    isRunning = true;
-    window.isRunning = true;
-    document.body.classList.add('running');
-    document.getElementById('run-status').textContent = 'Running';
-    document.getElementById('run-status').style.color = 'var(--c-green)';
+    stopAll();
+    displayedVars = {};
+    updateVarDisplay();
+    pressedKeys = {};
+    
+    const overlay = document.getElementById('start-overlay');
+    if (overlay) overlay.style.display = 'none';
+    
+    setTimeout(() => {
+        isRunning = true;
+        window.isRunning = true;
+        
+        // Reset listeners
+        [stage, ...sprites].forEach(s => s._listeners = { onClick: [], onKey: [], onMessage: [] });
+        
+        // Run code for all sprites
+        [stage, ...sprites].forEach(s => runSpriteCode(s));
+    }, 80);
+}
 
-    // Reset listeners
-    [stage, ...sprites].forEach(s => s._listeners = { onClick: [], onKey: [], onMessage: [] });
+// ─────────────────────────────────────────────────────────────────
+// RESIZABLE PANELS
+// ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────
+// RESIZABLE PANELS
+// ─────────────────────────────────────────────────────────────────
+function setupResizers() {
+    const resizerH = document.getElementById('resizer-h');
+    const leftPane = document.getElementById('left-pane');
+    const rightPane = document.getElementById('right-pane');
+    const topPane = document.getElementById('top-right-pane');
+    const resizerV = document.getElementById('resizer-v');
+    const bottomPane = document.getElementById('bottom-right-pane');
 
-    // Run each sprite
-    skulptRunners = [stage, ...sprites].map(s => runSpriteCode(s));
-  }, 80);
+    let isResizingH = false;
+    let isResizingV = false;
+
+    if (resizerH) {
+        resizerH.addEventListener('mousedown', (e) => {
+            isResizingH = true;
+            document.body.style.cursor = 'col-resize';
+            e.preventDefault();
+        });
+    }
+
+    if (resizerV) {
+        resizerV.addEventListener('mousedown', (e) => {
+            isResizingV = true;
+            document.body.style.cursor = 'row-resize';
+            e.preventDefault();
+        });
+    }
+
+    window.addEventListener('mousemove', (e) => {
+        if (isResizingH) {
+            // Horizontal resizing works fine, keep as is
+            if (e.clientX > 200 && e.clientX < window.innerWidth - 300) {
+                leftPane.style.width = e.clientX + 'px';
+                leftPane.style.flex = 'none';
+            }
+        }
+        if (isResizingV) {
+            // Get exact measurements of the right column
+            const topPaneRect = topPane.getBoundingClientRect();
+            const containerRect = rightPane.getBoundingClientRect();
+            
+            // Calculate proportional heights based on exactly where the mouse is
+            let topHeight = e.clientY - topPaneRect.top;
+            let bottomHeight = containerRect.bottom - e.clientY;
+            
+            // Enforce minimum sizes (100px) so neither pane is crushed completely
+            if (topHeight > 100 && bottomHeight > 100) {
+                
+                // Bulletproof Flex Splitter: 
+                // We set internal base heights to 0px, and force flex-grow to act 
+                // as a direct ratio. The browser has no choice but to make them 
+                // meet EXACTLY at your mouse cursor.
+                topPane.style.height = '0px';
+                bottomPane.style.height = '0px';
+                
+                topPane.style.flex = `${topHeight} 1 0%`;
+                bottomPane.style.flex = `${bottomHeight} 1 0%`;
+            }
+        }
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (isResizingH || isResizingV) {
+            isResizingH = false;
+            isResizingV = false;
+            document.body.style.cursor = '';
+        }
+    });
 }
 
 // ─── Save / Load / Publish ───
 function saveProject() {
   const data = {
-    v: 2,
+    v: 3, // Bumped version to represent the new file system
     sprites: sprites.map(s => ({ ...s, imgCache: {} })),
-    stage:   { ...stage,   imgCache: {} }
+    stage: { ...stage, imgCache: {} },
+    files: virtualFiles // Save our global Python files
   };
   const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'project.ps2'; a.click();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'project.ps2';
+  a.click();
+}
+
+// ─── File Manager UI ───
+function renderFileTabs() {
+    const container = document.getElementById('file-tabs');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    openFileTabs.forEach(filename => {
+        const tab = document.createElement('div');
+        const isActive = (activeEditorFile === filename);
+        
+        tab.className = `px-4 py-1 text-sm font-mono rounded-t cursor-pointer flex items-center gap-2 ${
+            isActive 
+            ? 'bg-white border-t-2 border-indigo-500 text-gray-800 font-bold' 
+            : 'bg-gray-300 text-gray-600 hover:bg-gray-100'
+        }`;
+        
+        tab.innerHTML = `<i class="fa-brands fa-python text-blue-500"></i> ${filename}`;
+        
+        tab.onclick = () => {
+            // Save current code before switching
+            saveCurrentEditorCode();
+            
+            // Swap state
+            activeEditorFile = filename;
+            activeEditorSprId = null; 
+            currentSelection = null; 
+            
+            // Load file code into editor
+            const editor = document.getElementById('code-editor');
+            editor.value = virtualFiles[filename];
+            
+            // Update UI
+            updateEditorHeader();
+            renderSpriteList();
+            renderFileTabs();
+        };
+        
+        container.appendChild(tab);
+    });
+}
+
+function saveCurrentEditorCode() {
+    const editor = document.getElementById('code-editor');
+    if (activeEditorFile) {
+        virtualFiles[activeEditorFile] = editor.value;
+    } else if (activeEditorSprId) {
+        let s = activeEditorSprId === 'stage' ? stage : sprites.find(s => s.id === activeEditorSprId);
+        if (s) s.code = editor.value;
+    }
 }
 
 function loadProject(input) {
-  const file = input.files[0]; if (!file) return;
+  const file = input.files[0];
+  if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
     const data = JSON.parse(e.target.result);
-    stage   = Object.assign(new Sprite('Stage', true), data.stage);
+    stage = Object.assign(new Sprite('Stage', true), data.stage);
     sprites = data.sprites.map(sd => Object.assign(new Sprite(sd.name), sd));
+    
+    // Load virtual files (fallback to empty object for old v2 saves)
+    virtualFiles = data.files || {};
+    openFileTabs = Object.keys(virtualFiles);
+    
     selectSprite(sprites[0]?.id || 'stage');
     activeEditorSprId = sprites[0]?.id || 'stage';
+    activeEditorFile = null; // Default to showing the sprite code first
+    
     loadEditorForSprite(getSelectedSprite() || stage);
-    renderEditorTabs();
+    renderFileTabs(); // We will write this UI function next
     renderSpriteList();
   };
   reader.readAsText(file);
@@ -1178,7 +1381,8 @@ function loadProject(input) {
 function publishProject() {
   const exportData = {
     sprites: sprites.map(s => ({ ...s, imgCache: {} })),
-    stage:   { ...stage,   imgCache: {} }
+    stage: { ...stage, imgCache: {} },
+    files: virtualFiles // INJECT FILES INTO PUBLISHED HTML
   };
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -1239,8 +1443,32 @@ function spriteAt(s,mx,my){if(!s.visible)return false;const img=s.imgCache[s.cur
 function spritesOverlap(a,b){const ia=a.imgCache[a.currentCostume?.url];const ib=b.imgCache[b.currentCostume?.url];if(!ia||!ib)return false;const ra=Math.hypot(ia.width,ia.height)/2*(a.size/100);const rb=Math.hypot(ib.width,ib.height)/2*(b.size/100);if(Math.hypot(a.x-b.x,a.y-b.y)>ra+rb)return false;collisionCtx.clearRect(0,0,STAGE_WIDTH,STAGE_HEIGHT);drawSprite(a,collisionCtx);collisionCtx.globalCompositeOperation='source-in';drawSprite(b,collisionCtx);collisionCtx.globalCompositeOperation='source-over';const mnX=Math.max(0,Math.floor(STAGE_WIDTH/2+Math.min(a.x-ra,b.x-rb)));const mnY=Math.max(0,Math.floor(STAGE_HEIGHT/2-Math.max(a.y+ra,b.y+rb)));const mxX=Math.min(STAGE_WIDTH,Math.ceil(STAGE_WIDTH/2+Math.max(a.x+ra,b.x+rb)));const mxY=Math.min(STAGE_HEIGHT,Math.ceil(STAGE_HEIGHT/2-Math.min(a.y-ra,b.y-rb)));const w=mxX-mnX,h=mxY-mnY;if(w<=0||h<=0)return false;const d=collisionCtx.getImageData(mnX,mnY,w,h).data;for(let i=3;i<d.length;i+=4)if(d[i]>0)return true;return false;}
 function updateVarDisplay(){const ov=document.getElementById('variable-overlay');ov.innerHTML='';for(const[k,v]of Object.entries(displayedVars)){const d=document.createElement('div');d.className='var-box';d.innerHTML='<span style="opacity:.8;margin-right:4px">'+k+'</span><span style="background:rgba(0,0,0,.3);padding:0 4px;border-radius:2px">'+v+'</span>';ov.appendChild(d);}}
 function buildPyScratchModuleMin(sprite){function pyN(){return Sk.builtin.none.none$;}function pyB(v){return v?Sk.builtin.bool.true$:Sk.builtin.bool.false$;}function pyF(v){return new Sk.builtin.float_(v);}function jsN(v){return Sk.ffi.remapToJs(v);}function jsS(v){return Sk.ffi.remapToJs(v);}function sus(p){const s=new Sk.misceval.Suspension();s.resume=()=>p;s.data={type:'Sk.promise',promise:p};return s;}const d={};d.move_steps=new Sk.builtin.func(function(s){const n=jsN(s);const r=(90-sprite.direction)*Math.PI/180;sprite.x+=n*Math.cos(r);sprite.y+=n*Math.sin(r);return pyN();});d.turn=new Sk.builtin.func(function(dg){sprite.direction+=jsN(dg);return pyN();});d.go_to=new Sk.builtin.func(function(x,y){if(Sk.ffi.remapToJs(x)==='random'){sprite.x=Math.random()*STAGE_WIDTH-STAGE_WIDTH/2;sprite.y=Math.random()*STAGE_HEIGHT-STAGE_HEIGHT/2;}else{sprite.x=jsN(x);sprite.y=jsN(y);}return pyN();});d.set_x=new Sk.builtin.func(function(v){sprite.x=jsN(v);return pyN();});d.set_y=new Sk.builtin.func(function(v){sprite.y=jsN(v);return pyN();});d.change_x=new Sk.builtin.func(function(v){sprite.x+=jsN(v);return pyN();});d.change_y=new Sk.builtin.func(function(v){sprite.y+=jsN(v);return pyN();});d.get_x=new Sk.builtin.func(function(){return pyF(sprite.x);});d.get_y=new Sk.builtin.func(function(){return pyF(sprite.y);});d.get_direction=new Sk.builtin.func(function(){return pyF(sprite.direction);});d.on_edge=new Sk.builtin.func(function(){sprite._hitEdges={};const img=sprite.imgCache[sprite.currentCostume?.url];if(!img)return pyB(false);const diag=Math.hypot(img.width,img.height)/2;const radius=diag*(sprite.size/100);const hw=STAGE_WIDTH/2,hh=STAGE_HEIGHT/2;if(sprite.x>-hw+radius&&sprite.x<hw-radius&&sprite.y>-hh+radius&&sprite.y<hh-radius)return pyB(false);collisionCtx.clearRect(0,0,STAGE_WIDTH,STAGE_HEIGHT);drawSprite(sprite,collisionCtx);const chk=(x,y,w,h)=>{const dd=collisionCtx.getImageData(x,y,w,h).data;for(let i=3;i<dd.length;i+=4)if(dd[i]>0)return true;return false;};let hit=false;if(chk(0,0,STAGE_WIDTH,1)){sprite._hitEdges.top=true;hit=true;}if(chk(0,STAGE_HEIGHT-1,STAGE_WIDTH,1)){sprite._hitEdges.bottom=true;hit=true;}if(chk(0,0,1,STAGE_HEIGHT)){sprite._hitEdges.left=true;hit=true;}if(chk(STAGE_WIDTH-1,0,1,STAGE_HEIGHT)){sprite._hitEdges.right=true;hit=true;}if(!hit){if(sprite.x<-hw){sprite._hitEdges.left=true;hit=true;}if(sprite.x>hw){sprite._hitEdges.right=true;hit=true;}if(sprite.y<-hh){sprite._hitEdges.bottom=true;hit=true;}if(sprite.y>hh){sprite._hitEdges.top=true;hit=true;}}return pyB(hit);});d.bounce=new Sk.builtin.func(function(){const edges=sprite._hitEdges||{};const rad=sprite.direction*Math.PI/180;const vx=Math.sin(rad),vy=Math.cos(rad);if((edges.left&&vx<0)||(edges.right&&vx>0))sprite.direction=-sprite.direction;if((edges.top&&vy>0)||(edges.bottom&&vy<0))sprite.direction=180-sprite.direction;return pyN();});d.point_towards=new Sk.builtin.func(function(a,b){const av=Sk.ffi.remapToJs(a);if(b===undefined||b===Sk.builtin.none.none$){if(typeof av==='number'){sprite.direction=av;return pyN();}if(av==='mouse pointer'||av==='mouse_pointer'){const dx=mouse.x-sprite.x,dy=mouse.y-sprite.y;sprite.direction=90-Math.atan2(dy,dx)*180/Math.PI;return pyN();}const t=sprites.find(s=>s.name===av);if(t){const dx=t.x-sprite.x,dy=t.y-sprite.y;sprite.direction=90-Math.atan2(dy,dx)*180/Math.PI;}return pyN();}const tx=jsN(a),ty=jsN(b);sprite.direction=90-Math.atan2(ty-sprite.y,tx-sprite.x)*180/Math.PI;return pyN();});d.say=new Sk.builtin.func(function(msg,secs){sprite.speechBubble.text=Sk.ffi.remapToJs(msg);const ms=(secs!==undefined?jsN(secs):2)*1000;return sus(new Promise(r=>setTimeout(()=>{sprite.speechBubble.text=null;r(pyN());},ms)));});d.set_costume=new Sk.builtin.func(function(name){const n=jsS(name);const idx=sprite.costumes.findIndex(c=>c.name===n);if(idx>=0)sprite.currentCostumeIdx=idx;return pyN();});d.next_costume=new Sk.builtin.func(function(){sprite.currentCostumeIdx=(sprite.currentCostumeIdx+1)%sprite.costumes.length;return pyN();});d.set_stage=new Sk.builtin.func(function(name){const n=jsS(name);const idx=stage.costumes.findIndex(c=>c.name===n);if(idx>=0)stage.currentCostumeIdx=idx;return pyN();});d.next_stage=new Sk.builtin.func(function(){stage.currentCostumeIdx=(stage.currentCostumeIdx+1)%stage.costumes.length;return pyN();});d.set_size=new Sk.builtin.func(function(v){sprite.size=jsN(v);return pyN();});d.change_size=new Sk.builtin.func(function(v){sprite.size+=jsN(v);return pyN();});d.show=new Sk.builtin.func(function(){sprite.visible=true;return pyN();});d.hide=new Sk.builtin.func(function(){sprite.visible=false;return pyN();});d.glide_to=new Sk.builtin.func(function(x,y,secs){let tx=Sk.ffi.remapToJs(x),ty,dur;if(tx==='random'){tx=Math.random()*STAGE_WIDTH-STAGE_WIDTH/2;ty=Math.random()*STAGE_HEIGHT-STAGE_HEIGHT/2;dur=jsN(y);}else{tx=jsN(x);ty=jsN(y);dur=jsN(secs);}const sx=sprite.x,sy=sprite.y,st=Date.now(),ms=dur*1000;return sus(new Promise(r=>{const step=()=>{if(!isRunning)return r(pyN());const p=Math.min(1,(Date.now()-st)/ms);sprite.x=sx+(tx-sx)*p;sprite.y=sy+(ty-sy)*p;if(p<1)requestAnimationFrame(step);else r(pyN());};requestAnimationFrame(step);}));});d.wait=new Sk.builtin.func(function(secs){const ms=jsN(secs)*1000;return sus(new Promise(r=>setTimeout(()=>r(pyN()),ms)));});d.stop=new Sk.builtin.func(function(){stopAll();return pyN();});d.broadcast=new Sk.builtin.func(function(msg){const m=jsS(msg);for(const s of[stage,...sprites]){if(s._listeners.onMessage)s._listeners.onMessage.forEach(fn=>fn(m));}return pyN();});d.touching=new Sk.builtin.func(function(target){const t=jsS(target);if(t==='mouse_pointer'||t==='mouse pointer')return pyB(spriteAt(sprite,mouse.x,mouse.y));const tSpr=sprites.find(s=>s.name===t);if(!tSpr)return pyB(false);return pyB(spritesOverlap(sprite,tSpr));});d.distance_to=new Sk.builtin.func(function(target){const t=jsS(target);let tx,ty;if(t==='mouse_pointer'||t==='mouse pointer'){tx=mouse.x;ty=mouse.y;}else{const s=sprites.find(s=>s.name===t);if(!s)return pyF(9999);tx=s.x;ty=s.y;}return pyF(Math.hypot(sprite.x-tx,sprite.y-ty));});d.key_pressed=new Sk.builtin.func(function(key){return pyB(!!pressedKeys[jsS(key)]);});d.ask=new Sk.builtin.func(function(question){const ov=document.getElementById('ask-overlay');const pr=document.getElementById('ask-prompt');const inp=document.getElementById('ask-input');const btn=document.getElementById('ask-submit');pr.textContent=sprite.name+' asks: '+jsS(question);ov.classList.remove('hidden');inp.value='';inp.focus();return sus(new Promise(resolve=>{const submit=()=>{ov.classList.add('hidden');resolve(new Sk.builtin.str(inp.value));btn.removeEventListener('click',submit);};btn.addEventListener('click',submit);inp.addEventListener('keydown',function kd(e){if(e.key==='Enter'){submit();inp.removeEventListener('keydown',kd);}});})  );});d.display_variable=new Sk.builtin.func(function(name,val){displayedVars[jsS(name)]=Sk.ffi.remapToJs(val);updateVarDisplay();return pyN();});d.hide_variable=new Sk.builtin.func(function(name){delete displayedVars[jsS(name)];updateVarDisplay();return pyN();});return d;}
-function builtinRead(fname){if(fname==='pyscratch.js' || fname==='src/lib/pyscratch.js'){return 'var $builtinmodule=function(name){var d=Sk.__pyscratch_api__;d["__name__"]=new Sk.builtin.str("pyscratch");d["__all__"]=new Sk.builtin.list(Object.keys(d).filter(function(k){return k.indexOf("__")!==0;}).map(function(k){return new Sk.builtin.str(k);}));return d;};';}if(Sk.builtinFiles&&Sk.builtinFiles.files&&Sk.builtinFiles.files[fname])return Sk.builtinFiles.files[fname];throw new Error('File not found: '+fname);}
-function runSpriteCode(sprite){if(!sprite.code||!sprite.code.trim())return;sprite._listeners={onClick:[],onKey:[],onMessage:[]};Sk.__pyscratch_api__=buildPyScratchModuleMin(sprite);Sk.configure({output:t=>{console.log(t);},read:builtinRead,__future__:Sk.python3,execLimit:undefined,killableWhile:true,killableFor:true});const fsh={'Sk.delay':s=>new Promise((res,rej)=>{requestAnimationFrame(()=>{if(!isRunning){rej('__stopped__');return;}try{res(s.resume());}catch(e){rej(e);}});}), 'Sk.yield':s=>new Promise((res,rej)=>{requestAnimationFrame(()=>{if(!isRunning){rej('__stopped__');return;}try{res(s.resume());}catch(e){rej(e);}});})};const ss=e=>e==='__stopped__';const userCode=sprite.code.replace(/^\s*from\s+pyscratch\s+import\s+\*\s*\n?/gm,'');const codeToRun='from pyscratch import *\n'+userCode;Sk.misceval.asyncToPromise(()=>Sk.importMainWithBody('<stdin>',false,codeToRun,true),fsh).then(mod=>{const d=mod.$d;if(d.game_start&&isRunning)Sk.misceval.asyncToPromise(()=>Sk.misceval.callsimOrSuspendArray(d.game_start,[]),fsh).catch(e=>{if(!ss(e))console.error(e);});if(d.on_click)sprite._listeners.onClick.push(()=>{if(!isRunning)return;Sk.misceval.asyncToPromise(()=>Sk.misceval.callsimOrSuspendArray(d.on_click,[]),fsh).catch(e=>{if(!ss(e))console.error(e);});});if(d.on_keypress)sprite._listeners.onKey.push(key=>{if(!isRunning)return;Sk.misceval.asyncToPromise(()=>Sk.misceval.callsimOrSuspendArray(d.on_keypress,[new Sk.builtin.str(key)]),fsh).catch(e=>{if(!ss(e))console.error(e);});});if(d.broadcast_receive)sprite._listeners.onMessage.push(msg=>{if(!isRunning)return;Sk.misceval.asyncToPromise(()=>Sk.misceval.callsimOrSuspendArray(d.broadcast_receive,[new Sk.builtin.str(msg)]),fsh).catch(e=>{if(!ss(e))console.error(e);});});}).catch(e=>{if(!ss(e))console.error('Error in '+sprite.name+': '+e);});}
+
+// --- FULLY UPDATED BUILTIN READ ---
+function builtinRead(fname){
+  if(fname==='pyscratch.js' || fname==='src/lib/pyscratch.js'){
+    return 'var $builtinmodule=function(name){var d=Sk.__pyscratch_api__;d["__name__"]=new Sk.builtin.str("pyscratch");d["__all__"]=new Sk.builtin.list(Object.keys(d).filter(function(k){return k.indexOf("__")!==0;}).map(function(k){return new Sk.builtin.str(k);}));return d;};';
+  }
+  
+  if(__data__.files && __data__.files[fname] !== undefined) {
+      return __data__.files[fname];
+  }
+
+  // NEW: Strip 'src/lib/' in the published version too!
+  const strippedName = fname.replace(/^src\\/lib\\//, '');
+  if(__data__.files && __data__.files[strippedName] !== undefined) {
+      return __data__.files[strippedName];
+  }
+
+  if(Sk.builtinFiles&&Sk.builtinFiles.files&&Sk.builtinFiles.files[fname]) {
+    return Sk.builtinFiles.files[fname];
+  }
+  
+  throw new Error('File not found: '+fname);
+}
+// ------------------------------------
+
+function runSpriteCode(sprite){if(!sprite.code||!sprite.code.trim())return;sprite._listeners={onClick:[],onKey:[],onMessage:[]};Sk.__pyscratch_api__=buildPyScratchModuleMin(sprite);Sk.configure({output:t=>{console.log(t);},read:builtinRead,__future__:Sk.python3,execLimit:undefined,killableWhile:true,killableFor:true});const fsh={'Sk.delay':s=>new Promise((res,rej)=>{requestAnimationFrame(()=>{if(!isRunning){rej('__stopped__');return;}try{res(s.resume());}catch(e){rej(e);}});}), 'Sk.yield':s=>new Promise((res,rej)=>{requestAnimationFrame(()=>{if(!isRunning){rej('__stopped__');return;}try{res(s.resume());}catch(e){rej(e);}});})};const ss=e=>e==='__stopped__';Sk.misceval.asyncToPromise(()=>Sk.importMainWithBody('<stdin>',false,sprite.code,true),fsh).then(mod=>{const d=mod.$d;if(d.game_start&&isRunning)Sk.misceval.asyncToPromise(()=>Sk.misceval.callsimOrSuspendArray(d.game_start,[]),fsh).catch(e=>{if(!ss(e))console.error(e);});if(d.on_click)sprite._listeners.onClick.push(()=>{if(!isRunning)return;Sk.misceval.asyncToPromise(()=>Sk.misceval.callsimOrSuspendArray(d.on_click,[]),fsh).catch(e=>{if(!ss(e))console.error(e);});});if(d.on_keypress)sprite._listeners.onKey.push(key=>{if(!isRunning)return;Sk.misceval.asyncToPromise(()=>Sk.misceval.callsimOrSuspendArray(d.on_keypress,[new Sk.builtin.str(key)]),fsh).catch(e=>{if(!ss(e))console.error(e);});});if(d.broadcast_receive)sprite._listeners.onMessage.push(msg=>{if(!isRunning)return;Sk.misceval.asyncToPromise(()=>Sk.misceval.callsimOrSuspendArray(d.broadcast_receive,[new Sk.builtin.str(msg)]),fsh).catch(e=>{if(!ss(e))console.error(e);});});}).catch(e=>{if(!ss(e))console.error('Error in '+sprite.name+': '+e);});}
 function stopAll(){isRunning=false;window.isRunning=false;}
 function startAll(){stopAll();displayedVars={};updateVarDisplay();pressedKeys={};document.getElementById('start-overlay').style.display='none';setTimeout(()=>{isRunning=true;window.isRunning=true;[stage,...sprites].forEach(s=>s._listeners={onClick:[],onKey:[],onMessage:[]});[stage,...sprites].forEach(s=>runSpriteCode(s));},80);}
 const canvas2=document.getElementById('game-canvas');canvas2.addEventListener('mousemove',e=>{const r=canvas2.getBoundingClientRect();const sx=STAGE_WIDTH/r.width,sy=STAGE_HEIGHT/r.height;mouse.x=(e.clientX-r.left)*sx-STAGE_WIDTH/2;mouse.y=-((e.clientY-r.top)*sy-STAGE_HEIGHT/2);});canvas2.addEventListener('mousedown',()=>{mouse.down=true;if(isRunning)[stage,...sprites].forEach(s=>{let hit=s.isStage||spriteAt(s,mouse.x,mouse.y);if(hit)s._listeners.onClick.forEach(fn=>fn());});});canvas2.addEventListener('mouseup',()=>mouse.down=false);
@@ -1284,18 +1512,23 @@ window.onload = async () => {
     window.stageLibUrls  = [URLS.DEFAULT_STAGE];
   }
 
+  
+
   activeEditorSprId = sp1.id;
   currentSelection  = sp1.id;
 
-  renderEditorTabs();
+  renderFileTabs();
   loadEditorForSprite(sp1);
   renderSpriteList();
   updatePropBar();
+  setupResizers(); // <--- ADD THIS LINE HERE
   setupInputs();
   renderLoop();
 
   consoleLog('PyScratch ready — write Python and press Run ▶', 'info');
   consoleLog('Use: from pyscratch import *', 'info');
+
+  
 };
 
 // Expose globals needed for HTML event handlers

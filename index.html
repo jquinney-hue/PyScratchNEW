@@ -158,17 +158,24 @@
     <div class="flex flex-1 overflow-hidden">
 
         <!-- ── LEFT: Editor ── -->
-        <div class="w-1/2 flex flex-col border-r border-gray-300 bg-gray-100">
+        <div id="left-pane" class="flex flex-col border-r border-gray-300 bg-gray-100" style="width: 50%;">
 
-            <!-- Sprite tabs: script.js populates id="sprite-tabs" with one tab per sprite -->
-            <div id="sprite-tabs">
-                <!-- filled by renderEditorTabs() in script.js -->
-            </div>
+                    <div class="flex items-center bg-gray-200 border-b border-gray-300 px-2 h-10 shrink-0">
+            
+            <button id="btn-file-manager" onclick="toggleFileManager()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 border border-indigo-300 px-3 py-1.5 rounded text-sm font-bold flex items-center shadow-sm mr-3 transition-colors">
+                <i class="fa-solid fa-folder-tree mr-2"></i> Files
+            </button>
+            
+            <div id="file-tabs" class="flex-1 flex overflow-x-auto gap-1 items-end h-full pt-1 scrollbar-hide">
+                </div>
+
+        </div>
 
             <!-- Editor header: script.js writes to id="editor-filename" -->
             <div style="display:flex;align-items:center;padding:3px 8px;background:#f9fafb;border-bottom:1px solid #e5e7eb;font-size:11px;gap:6px;flex-shrink:0;">
                 <i class="fa-brands fa-python" style="color:#306998;"></i>
-                <span id="editor-filename" style="color:#e53e3e;font-family:'Roboto Mono',monospace;">sprite1.py</span>
+                <div id="editor-title" class="px-4 py-2 text-sm font-mono bg-gray-200 border-b border-gray-300">
+    </div>
             </div>
 
             <!-- Code editor: script.js reads/writes id="code-editor" -->
@@ -196,109 +203,129 @@
         </div>
 
         <!-- ── RIGHT: Stage + Props + Sprites ── -->
-        <div class="w-1/2 flex flex-col bg-gray-200">
+        <div id="resizer-h" class="w-2 bg-gray-300 hover:bg-indigo-400 cursor-col-resize flex-shrink-0 transition-colors z-20 flex flex-col justify-center items-center group">
+            <div class="w-1 h-8 bg-gray-400 group-hover:bg-white rounded-full"></div>
+        </div>
 
-            <!-- Stage View -->
-            <div class="flex-1 p-4 flex flex-col relative">
-                <div class="flex justify-between items-center mb-2">
+        <div id="right-pane" class="flex-1 flex flex-col bg-gray-200 overflow-hidden">
+
+            <div id="top-right-pane" class="flex-1 p-4 flex flex-col relative min-h-0 overflow-hidden">
+                
+                <div class="flex justify-between items-center mb-2 shrink-0">
                     <h2 class="font-bold text-gray-600"><i class="fa-solid fa-gamepad mr-2"></i>Stage</h2>
                     <button onclick="toggleFullscreen()" class="text-gray-500 hover:text-gray-800" title="Fullscreen">
                         <i class="fa-solid fa-expand"></i>
                     </button>
                 </div>
 
-                <!--
-                    id="stage-wrap": toggleFullscreen() in script.js calls requestFullscreen() on this.
-                    The canvas must be id="game-canvas" — script.js grabs it at the top level.
-                -->
-                <div id="stage-wrap" class="relative w-full aspect-[4/3] bg-black border-4 border-gray-800 rounded-lg shadow-lg overflow-hidden mx-auto canvas-container">
-                    <canvas id="game-canvas" width="480" height="360" class="w-full h-full block object-contain"></canvas>
+                <div class="flex-1 relative w-full min-h-0 overflow-hidden">
+                    <div class="absolute inset-0 flex items-center justify-center">
+                        
+                        <div id="stage-wrap" class="relative aspect-[4/3] max-w-full max-h-full bg-black border-4 border-gray-800 rounded-lg shadow-lg overflow-hidden canvas-container">
+                            
+                            <canvas id="game-canvas" width="480" height="360" class="w-full h-full block object-contain"></canvas>
 
-                    <!-- Variable overlay: updateVarDisplay() in script.js populates this -->
-                    <div id="variable-overlay" class="absolute inset-0 p-2 flex flex-col items-start gap-2"></div>
+                            <div id="variable-overlay" class="absolute inset-0 p-2 flex flex-col items-start gap-2"></div>
 
-                    <!-- Ask overlay: ask() in the pyscratch module shows/hides this -->
-                    <div id="ask-overlay" class="hidden absolute bottom-4 left-4 right-4 bg-white p-2 rounded shadow-lg border border-indigo-200 flex flex-col gap-1">
-                        <span id="ask-prompt" class="text-sm font-bold text-indigo-600">Sprite asks...</span>
-                        <div class="flex">
-                            <input type="text" id="ask-input" class="flex-1 border border-gray-300 rounded-l px-2 py-1 focus:outline-none focus:border-indigo-500">
-                            <button id="ask-submit" class="bg-indigo-600 text-white px-4 rounded-r"><i class="fa-solid fa-check"></i></button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Properties Bar + Sprite List -->
-            <div class="h-64 bg-white border-t border-gray-300 flex flex-col">
-
-                <!-- Properties Bar -->
-                <div class="h-16 border-b border-gray-200 flex items-center px-2 space-x-2 text-sm bg-gray-50 relative z-20">
-                    <div class="flex flex-col shrink-0">
-                        <label class="text-xs font-bold text-gray-500">Sprite</label>
-                        <!-- onchange not oninput — matches old HTML; script.js also uses updateSpriteProp() -->
-                        <input type="text" id="prop-name" class="border rounded px-1 w-20 text-xs py-1" onchange="updateSpriteProp('name', this.value)">
-                    </div>
-                    <div class="flex space-x-1 shrink-0">
-                        <div class="flex flex-col w-14">
-                            <label class="text-xs font-bold text-gray-500">X</label>
-                            <input type="number" id="prop-x" class="border rounded px-1 text-xs py-1" onchange="updateSpriteProp('x', this.value)">
-                        </div>
-                        <div class="flex flex-col w-14">
-                            <label class="text-xs font-bold text-gray-500">Y</label>
-                            <input type="number" id="prop-y" class="border rounded px-1 text-xs py-1" onchange="updateSpriteProp('y', this.value)">
-                        </div>
-                    </div>
-                    <div class="flex flex-col w-14 shrink-0">
-                        <label class="text-xs font-bold text-gray-500">Size</label>
-                        <input type="number" id="prop-size" class="border rounded px-1 text-xs py-1" onchange="updateSpriteProp('size', this.value)">
-                    </div>
-
-                    <!-- Direction: script.js writes to prop-dir and angle-picker-line.
-                         NOTE: "readonly" removed — script.js needs to write the value. -->
-                    <div class="relative group shrink-0">
-                        <div class="flex flex-col w-14 cursor-pointer">
-                            <label class="text-xs font-bold text-gray-500">Direction</label>
-                            <input type="number" id="prop-dir" class="border rounded px-1 cursor-pointer text-xs py-1" onchange="updateSpriteProp('direction', this.value)">
-                        </div>
-                        <!-- Popup angle picker: script.js attaches mousedown to id="angle-picker"
-                             and sets transform on id="angle-picker-line" -->
-                        <div class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-50">
-                            <div class="w-32 h-32 bg-white rounded-full shadow-xl border-4 border-gray-200 angle-circle relative" id="angle-picker">
-                                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                    <div class="w-1 h-1 bg-black rounded-full"></div>
-                                </div>
-                                <!--
-                                    angle-picker-line: script.js sets transform on this to rotate the needle.
-                                    Origin must be at the center of the circle, so we use a line that starts
-                                    at center. The transform-origin should be the left end (center of circle).
-                                    Script does: rotate(direction - 90)deg
-                                -->
-                                <div id="angle-picker-line"
-                                     class="absolute angle-line"
-                                     style="top:50%;left:50%;width:40%;height:3px;background:#4f46e5;transform-origin:left center;transform:rotate(0deg);margin-top:-1.5px;border-radius:2px;">
+                            <div id="ask-overlay" class="hidden absolute bottom-4 left-4 right-4 bg-white p-2 rounded shadow-lg border border-indigo-200 flex flex-col gap-1">
+                                <span id="ask-prompt" class="text-sm font-bold text-indigo-600">Sprite asks...</span>
+                                <div class="flex">
+                                    <input type="text" id="ask-input" class="flex-1 border border-gray-300 rounded-l px-2 py-1 focus:outline-none focus:border-indigo-500">
+                                    <button id="ask-submit" class="bg-indigo-600 text-white px-4 rounded-r"><i class="fa-solid fa-check"></i></button>
                                 </div>
                             </div>
+                            
                         </div>
-                        <!-- dir-display: script.js writes the degree value here -->
-                        <div id="dir-display" class="text-xs text-center text-gray-500 mt-0.5">90°</div>
-                    </div>
 
-                    <!-- Rotation Style -->
-                    <div class="flex flex-col shrink-0">
-                        <label class="text-xs font-bold text-gray-500">Rotation</label>
-                        <select id="prop-rot-style" class="border rounded text-xs py-1 w-24" onchange="updateSpriteProp('rotationStyle', this.value)">
-                            <option value="all">All Around</option>
-                            <option value="left-right">Left/Right</option>
-                            <option value="none">Don't Rotate</option>
-                        </select>
                     </div>
-                </div>
-
-                <!-- Sprite List: script.js populates id="sprite-list" via renderSpriteList() -->
-                <div class="flex-1 overflow-x-auto p-3 flex items-center gap-3 bg-white" id="sprite-list">
-                    <!-- filled by renderSpriteList() in script.js -->
                 </div>
             </div>
+
+            <div id="resizer-v" class="h-2 bg-gray-300 border-t border-gray-300 hover:bg-indigo-400 cursor-row-resize flex-shrink-0 transition-colors z-20 flex justify-center items-center group">
+                <div class="w-8 h-1 bg-gray-400 group-hover:bg-white rounded-full"></div>
+            </div>
+
+            <div id="bottom-right-pane" class="flex flex-col bg-white shrink-0 min-h-[100px]" style="height: 256px;">
+                <style>
+                /* CSS for the right-side tabs */
+                .right-tab-btn { background: #e5e7eb; border-top: 2px solid transparent; color: #4b5563; transition: all 0.2s; }
+                .right-tab-btn:hover { background: #f3f4f6; }
+                .right-tab-btn.active { background: white; border-top-color: #4f46e5; color: #1f2937; font-weight: bold; }
+                </style>
+                
+                <div class="flex bg-gray-200 border-b border-gray-300 text-xs shrink-0">
+                    <button id="tab-props-btn" class="right-tab-btn active px-4 py-2" onclick="switchRightTab('props')">Sprites & Properties</button>
+                    <button id="tab-cos-btn" class="right-tab-btn px-4 py-2" onclick="switchRightTab('costumes')">Costumes</button>
+                </div>
+
+                <div class="flex-1 relative overflow-hidden">
+                    
+                    <div id="tab-props" class="absolute inset-0 flex flex-col bg-white">
+                        
+                        <div class="h-16 border-b border-gray-200 flex items-center px-2 space-x-2 text-sm bg-gray-50 relative z-20">
+                            <div class="flex flex-col shrink-0">
+                                <label class="text-xs font-bold text-gray-500">Sprite</label>
+                                <input type="text" id="prop-name" class="border rounded px-1 w-20 text-xs py-1" onchange="updateSpriteProp('name', this.value)">
+                            </div>
+                            <div class="flex space-x-1 shrink-0">
+                                <div class="flex flex-col w-14">
+                                    <label class="text-xs font-bold text-gray-500">X</label>
+                                    <input type="number" id="prop-x" class="border rounded px-1 text-xs py-1" onchange="updateSpriteProp('x', this.value)">
+                                </div>
+                                <div class="flex flex-col w-14">
+                                    <label class="text-xs font-bold text-gray-500">Y</label>
+                                    <input type="number" id="prop-y" class="border rounded px-1 text-xs py-1" onchange="updateSpriteProp('y', this.value)">
+                                </div>
+                            </div>
+                            <div class="flex flex-col w-14 shrink-0">
+                                <label class="text-xs font-bold text-gray-500">Size</label>
+                                <input type="number" id="prop-size" class="border rounded px-1 text-xs py-1" onchange="updateSpriteProp('size', this.value)">
+                            </div>
+
+                            <div class="relative group shrink-0">
+                                <div class="flex flex-col w-14 cursor-pointer">
+                                    <label class="text-xs font-bold text-gray-500">Direction</label>
+                                    <input type="number" id="prop-dir" class="border rounded px-1 cursor-pointer text-xs py-1" onchange="updateSpriteProp('direction', this.value)">
+                                </div>
+                                <div class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-50">
+                                    <div class="w-32 h-32 bg-white rounded-full shadow-xl border-4 border-gray-200 angle-circle relative" id="angle-picker">
+                                        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                            <div class="w-1 h-1 bg-black rounded-full"></div>
+                                        </div>
+                                        <div id="angle-picker-line" class="absolute angle-line" style="top:50%;left:50%;width:40%;height:3px;background:#4f46e5;transform-origin:left center;transform:rotate(0deg);margin-top:-1.5px;border-radius:2px;"></div>
+                                    </div>
+                                </div>
+                                <div id="dir-display" class="text-xs text-center text-gray-500 mt-0.5">90°</div>
+                            </div>
+
+                            <div class="flex flex-col shrink-0">
+                                <label class="text-xs font-bold text-gray-500">Rotation</label>
+                                <select id="prop-rot-style" class="border rounded text-xs py-1 w-24" onchange="updateSpriteProp('rotationStyle', this.value)">
+                                    <option value="all">All Around</option>
+                                    <option value="left-right">Left/Right</option>
+                                    <option value="none">Don't Rotate</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="flex-1 overflow-x-auto p-3 flex items-center gap-3 bg-white" id="sprite-list">
+                        </div>
+                    </div>
+
+                    <div id="tab-costumes" class="absolute inset-0 flex flex-col hidden bg-gray-50">
+                        <div class="p-2 border-b border-gray-200 bg-gray-100 flex justify-between items-center shrink-0">
+                            <span class="font-bold text-gray-600 text-xs">Costumes</span>
+                            <button onclick="openLibraryForAdd('costume')" class="bg-indigo-100 text-indigo-700 px-2 py-1 rounded text-xs hover:bg-indigo-200 transition font-bold">
+                                <i class="fa-solid fa-plus mr-1"></i> Add
+                            </button>
+                        </div>
+                        <div id="costumes-section" class="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
         </div>
     </div>
 
