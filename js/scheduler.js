@@ -64,7 +64,10 @@ const Scheduler = (() => {
     activeThreads = [];
     _runId++;
 
-    for (const sp of Engine.getAllSprites()) startSpriteThreads(sp, 'game_start');
+    // Only fire game_start on real sprites, never on clones
+    for (const sp of Engine.getAllSprites()) {
+      if (!sp.isClone) startSpriteThreads(sp, 'game_start');
+    }
     startSpriteThreads(Engine.state.stage, 'game_start');
 
     _scheduleLoop(_runId);
@@ -119,10 +122,18 @@ const Scheduler = (() => {
   // ── Events ────────────────────────────────────────────────────
   function fireEvent(type, target, extraArg) {
     if (!Engine.state.running) return;
-    const sprites = target === 'all'
-      ? [...Engine.getAllSprites(), Engine.state.stage]
-      : [Engine.getSprite(target)].filter(Boolean);
-    for (const sp of sprites) startSpriteThreads(sp, type, extraArg);
+    if (target === 'all') {
+      const sprites = Engine.getAllSprites();
+      for (const sp of sprites) {
+        // game_start never fires on clones — they use on_clone_start
+        if (type === 'game_start' && sp.isClone) continue;
+        startSpriteThreads(sp, type, extraArg);
+      }
+      startSpriteThreads(Engine.state.stage, type, extraArg);
+    } else {
+      const sp = Engine.getSprite(target);
+      if (sp) startSpriteThreads(sp, type, extraArg);
+    }
   }
 
   function fireEventAndWait(type, target, extraArg) {
