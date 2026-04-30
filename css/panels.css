@@ -1,11 +1,11 @@
-/* ── STAGE AREA ── */
+/* ── STAGE AREA ──────────────────────────────────────────────────── */
 #stage-area {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #000;
+  background: hsl(225, 15%, 20%);
   overflow: hidden;
   position: relative;
   min-height: 0;
@@ -15,6 +15,7 @@
   position: relative;
   display: inline-block;
   line-height: 0;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.35);
 }
 
 #stage-canvas {
@@ -22,99 +23,111 @@
   cursor: crosshair;
 }
 
+/* Overlays inside the canvas container */
 #stage-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
+/* Variable monitors — top right of canvas */
 #variable-display {
   position: absolute;
   top: 6px;
-  right: 6px;
+  left: 6px;          /* Scratch puts monitors top-left */
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   pointer-events: none;
 }
 
 .variable-monitor {
-  background: rgba(255,255,255,0.85);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: #222;
-  border: 1px solid rgba(0,0,0,0.2);
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 11px;
+  font-weight: bold;
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  border: 1px solid rgba(0,0,0,0.15);
 }
 .variable-monitor .var-name {
-  font-weight: 700;
-  color: #444;
+  background: hsl(215, 60%, 40%);
+  color: #fff;
+  padding: 2px 6px;
 }
 .variable-monitor .var-val {
-  color: #0066cc;
+  background: hsl(0, 0%, 97%);
+  color: hsl(215, 60%, 35%);
+  padding: 2px 8px;
 }
 
+/* Ask overlay */
 #ask-overlay {
   position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 0;
+  left: 0; right: 0;
   pointer-events: all;
-  width: 80%;
-}
-
-#ask-bubble {
   background: rgba(255,255,255,0.95);
-  border-radius: 8px;
-  padding: 10px 12px;
-  color: #222;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  border-top: 1px solid var(--border-mid);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 #ask-message {
-  display: block;
-  font-size: 13px;
-  font-family: var(--font-ui);
-  margin-bottom: 8px;
-  color: #333;
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .ask-input-row {
   display: flex;
   gap: 6px;
+  flex: 1;
 }
 
 #ask-input {
   flex: 1;
-  padding: 5px 8px;
-  border-radius: 4px;
-  border: 1px solid #ccc;
+  padding: 4px 8px;
+  border-radius: 99px;
+  border: 1px solid var(--border-mid);
   font-size: 12px;
   background: #fff;
-  color: #222;
+  color: var(--text);
+  outline: none;
 }
+#ask-input:focus { border-color: var(--scratch-purple); }
 
 #ask-submit {
-  padding: 5px 10px;
-  background: #4ade80;
-  color: #000;
+  padding: 4px 12px;
+  background: var(--scratch-purple);
+  color: #fff;
   border: none;
-  border-radius: 4px;
+  border-radius: 99px;
   cursor: pointer;
-  font-weight: 700;
+  font-weight: bold;
+  font-size: 13px;
+  transition: background 0.12s;
 }
+#ask-submit:hover { background: var(--scratch-purple-dark); }
 
+/* Stage controls bar */
 #stage-controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 4px 10px;
   background: var(--bg-panel2);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-mid);
   flex-shrink: 0;
   width: 100%;
 }
@@ -125,30 +138,29 @@
   color: var(--text-muted);
 }
 
-/* ── SPRITE PANEL ── */
+/* ── SPRITE PANEL ────────────────────────────────────────────────── */
 #sprite-panel {
-  height: 180px;
+  height: 186px;
   min-height: 140px;
   background: var(--bg-panel);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-mid);
   display: flex;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
+/* Left portion — sprite properties */
 #sprite-panel-top {
-  width: 220px;
+  width: 230px;
   min-width: 180px;
-  padding: 8px;
-  border-right: 1px solid var(--border);
+  padding: 8px 10px;
+  border-right: 1px solid var(--border-mid);
   flex-shrink: 0;
   overflow-y: auto;
+  background: var(--bg-panel2);
 }
 
-#sprite-props {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
+#sprite-props { display: flex; flex-direction: column; gap: 5px; }
 #sprite-props.hidden { display: none; }
 
 .prop-row {
@@ -158,13 +170,13 @@
 }
 
 .prop-row label {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: bold;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
   white-space: nowrap;
-  min-width: 30px;
+  min-width: 28px;
 }
 
 .prop-input {
@@ -172,9 +184,9 @@
   padding: 3px 6px;
   min-width: 0;
 }
-
+.prop-name { flex: 1; }
 .prop-num {
-  width: 56px;
+  width: 52px;
   flex: none;
   text-align: center;
   padding: 3px 4px;
@@ -189,11 +201,12 @@
 #dir-wheel {
   cursor: pointer;
   border-radius: 50%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-mid);
   background: var(--bg-input);
+  flex-shrink: 0;
 }
 
-/* ── SPRITE LIST ── */
+/* ── SPRITE LIST ─────────────────────────────────────────────────── */
 #sprite-list-area {
   flex: 1;
   display: flex;
@@ -201,16 +214,18 @@
   overflow: hidden;
   padding: 8px;
   gap: 6px;
+  background: var(--bg-panel);
 }
 
+/* Scrolling row of sprite thumbnails */
 #sprite-list {
   flex: 1;
   display: flex;
-  gap: 6px;
+  gap: 8px;
   overflow-x: auto;
   overflow-y: hidden;
   align-items: flex-start;
-  padding-bottom: 4px;
+  padding-bottom: 2px;
 }
 
 .sprite-thumb {
@@ -220,43 +235,42 @@
   gap: 4px;
   cursor: pointer;
   flex-shrink: 0;
-  width: 68px;
+  width: 72px;
 }
 
 .sprite-thumb-img {
-  width: 60px;
-  height: 60px;
-  object-fit: contain;
-  border: 2px solid var(--border);
+  width: 64px;
+  height: 64px;
+  border: 2px solid var(--border-mid);
   border-radius: var(--radius);
-  background: var(--bg-panel3);
+  background: var(--bg-panel2);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
-  transition: border-color 0.15s;
+  overflow: hidden;
+  transition: border-color 0.12s;
 }
-
-.sprite-thumb.active .sprite-thumb-img { border-color: var(--accent); }
-.sprite-thumb:hover .sprite-thumb-img { border-color: var(--border-light); }
-.sprite-thumb.active:hover .sprite-thumb-img { border-color: var(--accent); }
-
 .sprite-thumb-img img {
-  width: 100%;
-  height: 100%;
+  width: 100%; height: 100%;
   object-fit: contain;
+}
+.sprite-thumb:hover .sprite-thumb-img { border-color: var(--scratch-purple); }
+.sprite-thumb.active .sprite-thumb-img {
+  border-color: var(--scratch-purple);
+  box-shadow: 0 0 0 2px var(--accent-bg);
 }
 
 .sprite-thumb-name {
   font-size: 10px;
+  font-weight: bold;
   color: var(--text-dim);
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   width: 100%;
-  font-weight: 600;
 }
+.sprite-thumb.active .sprite-thumb-name { color: var(--scratch-purple); }
 
 .sprite-list-controls {
   display: flex;
@@ -264,36 +278,5 @@
   flex-shrink: 0;
 }
 
-/* ── SPEECH BUBBLES ── */
-.speech-bubble {
-  position: absolute;
-  background: white;
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 13px;
-  font-family: var(--font-ui);
-  color: #222;
-  white-space: nowrap;
-  pointer-events: none;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-  border: 1px solid #ddd;
-  z-index: 50;
-  max-width: 200px;
-  white-space: normal;
-  word-break: break-word;
-}
-
-/* ── RUNNING STATE ── */
-body.running #btn-start { opacity: 0.5; pointer-events: none; }
-body.running #stage-canvas { cursor: default; }
-
-/* ── PROP NAME (wider) ──────────────────────────────────────────── */
-.prop-name {
-  flex: 1;
-  padding: 3px 6px;
-}
-
-/* ── Stage placeholder ──────────────────────────────────────────── */
-#sprite-panel-top {
-  min-height: 0;
-}
+/* ── PROP ROWS — hide for stage ──────────────────────────────────── */
+.prop-name { flex: 1; }

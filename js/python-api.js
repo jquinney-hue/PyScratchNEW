@@ -1,47 +1,70 @@
-// python-api.js — Skulpt Python→JS bindings
+// python-api.js — builds the Skulpt builtins for a sprite/thread context
+//
+// Timing model:
+//   wait(0)   → Sk.yield suspension  → resumes on next rAF frame (frame-locked)
+//   wait(N)   → Sk.yield + _wakeAt   → rAF loop checks deadline, resumes when due
+//   glide/ask → Sk.promise            → only case that still uses a real Promise
+//
+// No setTimeout anywhere in the timing path.
 
 const PythonAPI = (() => {
 
   function buildModule(spriteId, threadId) {
-    const getSp   = () => Engine.getSprite(spriteId);
-    const none    = () => Sk.builtin.none.none$;
-    const num     = v  => new Sk.builtin.float_(+v);
-    const pyStr   = v  => new Sk.builtin.str(String(v));
-    const pyBool  = v  => v ? Sk.builtin.bool.true$ : Sk.builtin.bool.false$;
+    const getSp  = () => Engine.getSprite(spriteId);
+    const noneV  = Sk.builtin.none.none$;
+    const num    = v => new Sk.builtin.float_(+v);
+    const pyStr  = v => new Sk.builtin.str(String(v));
+    const pyBool = v => v ? Sk.builtin.bool.true$ : Sk.builtin.bool.false$;
+    const fn     = f => new Sk.builtin.func(f);
 
-    function makeSuspend(seconds) {
-      const susp = new Sk.misceval.Suspension();
-      susp.resume = () => Sk.builtin.none.none$;
-      susp.data   = {
-        type: 'Sk.promise',
-        promise: new Promise(r => setTimeout(r, seconds * 1000))
-      };
-      return susp;
+    // ── Suspension factories ──────────────────────────────────────
+    // Frame-yield: resume on the very next rAF tick.
+    function yieldSusp() {
+      const s  = new Sk.misceval.Suspension();
+      s.resume = () => noneV;
+      s.data   = { type: 'Sk.yield' };
+      return s;
     }
 
-    function fn(f) { return new Sk.builtin.func(f); }
+    // Timed wait: resume when performance.now() >= deadline.
+    // Still uses Sk.yield so it goes into _suspension; the rAF loop
+    // checks _wakeAt before resuming instead of resuming every frame.
+    function timedSusp(seconds) {
+      const s    = new Sk.misceval.Suspension();
+      s.resume   = () => noneV;
+      s.data     = { type: 'Sk.yield' };
+      s._wakeAt  = performance.now() + seconds * 1000;
+      return s;
+    }
+
+    // Promise suspension — only for glide_to (rAF-driven internally) and ask().
+    function promiseSusp(promise, resumeFn) {
+      const s  = new Sk.misceval.Suspension();
+      s.resume = resumeFn || (() => noneV);
+      s.data   = { type: 'Sk.promise', promise };
+      return s;
+    }
 
     const api = {
-      // ── Movement ───────────────────────────────────────────────
+
+      // ── Movement ─────────────────────────────────────────────
       move_steps: fn(steps => {
-        const sp = getSp(); if (!sp) return none();
-        const n   = +Sk.ffi.remapToJs(steps);
-        // direction: 0=up, 90=right
-        // dx = sin(dir), dy = cos(dir)  (Scratch convention)
-        const rad = Utils.degToRad(sp.direction);
-        sp.x += Math.sin(rad) * n;
-        sp.y += Math.cos(rad) * n;
-        return none();
+        const sp = getSp(); if (!sp) return noneV;
+        const n  = +Sk.ffi.remapToJs(steps);
+        const r  = Utils.degToRad(sp.direction);
+        sp.x += Math.sin(r) * n;
+        sp.y += Math.cos(r) * n;
+        return noneV;
       }),
 
-      turn: fn(degrees => {
-        const sp = getSp(); if (!sp) return none();
-        sp.direction = ((sp.direction + +Sk.ffi.remapToJs(degrees)) % 360 + 360) % 360;
-        return none();
+      turn: fn(deg => {
+        const sp = getSp(); if (!sp) return noneV;
+        sp.direction = ((sp.direction + +Sk.ffi.remapToJs(deg)) % 360 + 360) % 360;
+        return noneV;
       }),
 
       go_to: fn((xOrStr, y) => {
-        const sp = getSp(); if (!sp) return none();
+        const sp = getSp(); if (!sp) return noneV;
         if (y === undefined) {
           const t = Sk.ffi.remapToJs(xOrStr);
           if (t === 'random') {
@@ -54,202 +77,195 @@ const PythonAPI = (() => {
           sp.x = +Sk.ffi.remapToJs(xOrStr);
           sp.y = +Sk.ffi.remapToJs(y);
         }
-        return none();
+        return noneV;
       }),
 
       glide_to: fn((xOrStr, yOrSecs, secs) => {
-        const sp = getSp(); if (!sp) return makeSuspend(0);
+        const sp = getSp(); if (!sp) return yieldSusp();
         let tx, ty, dur;
         if (secs === undefined) {
-          // glide_to("random", seconds)
           const t = Sk.ffi.remapToJs(xOrStr);
           dur = +Sk.ffi.remapToJs(yOrSecs);
-          if (t === 'random') { tx = Math.random()*480-240; ty = Math.random()*360-180; }
-          else { tx = Renderer.mouseX; ty = Renderer.mouseY; }
+          tx  = t === 'random' ? Math.random()*480-240 : Renderer.mouseX;
+          ty  = t === 'random' ? Math.random()*360-180 : Renderer.mouseY;
         } else {
           tx = +Sk.ffi.remapToJs(xOrStr);
           ty = +Sk.ffi.remapToJs(yOrSecs);
           dur = +Sk.ffi.remapToJs(secs);
         }
-        const sx = sp.x, sy = sp.y;
-        const start = Date.now();
-        const susp = new Sk.misceval.Suspension();
-        susp.data = {
-          type: 'Sk.promise',
-          promise: new Promise(resolve => {
-            const tick = () => {
-              const t = Math.min(1, (Date.now() - start) / (dur * 1000));
-              sp.x = Utils.lerp(sx, tx, t);
-              sp.y = Utils.lerp(sy, ty, t);
-              if (t < 1) requestAnimationFrame(tick); else resolve();
-            };
-            tick();
-          })
-        };
-        susp.resume = () => none();
-        return susp;
+        const sx = sp.x, sy = sp.y, start = performance.now();
+        // glide uses rAF internally — promise resolves when animation done
+        return promiseSusp(new Promise(resolve => {
+          function tick() {
+            const t = Math.min(1, (performance.now() - start) / (dur * 1000));
+            sp.x = Utils.lerp(sx, tx, t);
+            sp.y = Utils.lerp(sy, ty, t);
+            if (t < 1) requestAnimationFrame(tick); else resolve();
+          }
+          requestAnimationFrame(tick);
+        }));
       }),
 
       point_towards: fn(target => {
-        const sp = getSp(); if (!sp) return none();
-        const t = Sk.ffi.remapToJs(target);
+        const sp = getSp(); if (!sp) return noneV;
+        const t  = Sk.ffi.remapToJs(target);
         let tx, ty;
         if (t === 'mouse_pointer' || t === 'mouse') {
           tx = Renderer.mouseX; ty = Renderer.mouseY;
         } else {
           const ts = Engine.getAllSprites().find(s => s.name === t || s.id === t);
-          if (!ts) return none();
+          if (!ts) return noneV;
           tx = ts.x; ty = ts.y;
         }
-        const dx = tx - sp.x, dy = ty - sp.y;
-        // Scratch: 0=up → atan2(dx, dy) gives that
-        sp.direction = (Utils.radToDeg(Math.atan2(dx, dy)) + 360) % 360;
-        return none();
+        sp.direction = (Utils.radToDeg(Math.atan2(tx - sp.x, ty - sp.y)) + 360) % 360;
+        return noneV;
       }),
 
-      change_x:    fn(v  => { const sp=getSp(); if(sp) sp.x += +Sk.ffi.remapToJs(v); return none(); }),
-      change_y:    fn(v  => { const sp=getSp(); if(sp) sp.y += +Sk.ffi.remapToJs(v); return none(); }),
-      set_x:       fn(v  => { const sp=getSp(); if(sp) sp.x  = +Sk.ffi.remapToJs(v); return none(); }),
-      set_y:       fn(v  => { const sp=getSp(); if(sp) sp.y  = +Sk.ffi.remapToJs(v); return none(); }),
-      get_x:       fn(() => { const sp=getSp(); return num(sp ? sp.x : 0); }),
-      get_y:       fn(() => { const sp=getSp(); return num(sp ? sp.y : 0); }),
+      change_x:      fn(v  => { const sp=getSp(); if(sp) sp.x += +Sk.ffi.remapToJs(v); return noneV; }),
+      change_y:      fn(v  => { const sp=getSp(); if(sp) sp.y += +Sk.ffi.remapToJs(v); return noneV; }),
+      set_x:         fn(v  => { const sp=getSp(); if(sp) sp.x  = +Sk.ffi.remapToJs(v); return noneV; }),
+      set_y:         fn(v  => { const sp=getSp(); if(sp) sp.y  = +Sk.ffi.remapToJs(v); return noneV; }),
+      get_x:         fn(() => { const sp=getSp(); return num(sp ? sp.x : 0); }),
+      get_y:         fn(() => { const sp=getSp(); return num(sp ? sp.y : 0); }),
       get_direction: fn(() => { const sp=getSp(); return num(sp ? sp.direction : 90); }),
 
-      // ── Edge & bounce ──────────────────────────────────────────
-      on_edge: fn(() => pyBool(Renderer.spriteOnEdge(getSp() || {x:0,y:0,size:100,_img:null}))),
-      bounce:  fn(() => { const sp=getSp(); if(sp) Renderer.bounceOffEdge(sp); return none(); }),
+      // ── Edge & bounce ─────────────────────────────────────────
+      on_edge: fn(() => {
+        const sp = getSp();
+        return pyBool(sp ? Renderer.spriteOnEdge(sp) : false);
+      }),
+      bounce: fn(() => {
+        const sp = getSp(); if (sp) Renderer.bounceOffEdge(sp); return noneV;
+      }),
 
-      // ── Looks ──────────────────────────────────────────────────
+      // ── Looks ─────────────────────────────────────────────────
       say: fn((msg, secs) => {
-        const sp = getSp(); if (!sp) return none();
-        const text = Sk.ffi.remapToJs(msg);
-        sp._sayText = String(text);
+        const sp = getSp(); if (!sp) return noneV;
+        sp._sayText = String(Sk.ffi.remapToJs(msg));
         if (sp._sayTimer) { clearTimeout(sp._sayTimer); sp._sayTimer = null; }
         if (secs !== undefined) {
           const dur = +Sk.ffi.remapToJs(secs);
           if (dur > 0) {
-            sp._sayTimer = setTimeout(() => { sp._sayText = null; }, dur * 1000);
-            return makeSuspend(dur);
+            // say(msg, secs) should block the thread for `dur` seconds
+            sp._sayTimer = null; // cleared by timedSusp wakeup — see scheduler
+            // We'll clear the bubble when the timed suspension resumes
+            const s = timedSusp(dur);
+            s._onResume = () => { sp._sayText = null; };
+            return s;
           }
         }
-        return none();
+        return noneV;
       }),
 
       set_costume: fn(name => {
-        const sp = getSp(); if (!sp) return none();
-        const n   = Sk.ffi.remapToJs(name);
-        const idx = sp.costumes.findIndex(c => c.name === n || String(c.name) === String(n));
-        if (idx >= 0) {
-          sp.currentCostume = idx;
-          Renderer.loadSpriteImage(sp).then(() => { UI.renderSpritePanel(); CostumePanel.load(sp); });
+        const sp = getSp(); if (!sp) return noneV;
+        const n  = String(Sk.ffi.remapToJs(name));
+        const i  = sp.costumes.findIndex(c => c.name === n);
+        if (i >= 0) {
+          sp.currentCostume = i;
+          Renderer.loadSpriteImage(sp).then(() => {
+            UI.renderSpritePanel();
+            if (Engine.getSelectedSprite() === sp) CostumePanel.load(sp);
+          });
         }
-        return none();
+        return noneV;
       }),
 
       next_costume: fn(() => {
-        const sp = getSp(); if (!sp) return none();
-        if (sp.costumes.length > 1) {
-          sp.currentCostume = (sp.currentCostume + 1) % sp.costumes.length;
-          Renderer.loadSpriteImage(sp).then(() => { UI.renderSpritePanel(); CostumePanel.load(sp); });
-        }
-        return none();
+        const sp = getSp(); if (!sp || sp.costumes.length <= 1) return noneV;
+        sp.currentCostume = (sp.currentCostume + 1) % sp.costumes.length;
+        Renderer.loadSpriteImage(sp).then(() => {
+          UI.renderSpritePanel();
+          if (Engine.getSelectedSprite() === sp) CostumePanel.load(sp);
+        });
+        return noneV;
       }),
 
       set_stage: fn(name => {
         const stage = Engine.state.stage;
-        const n     = Sk.ffi.remapToJs(name);
-        const idx   = stage.costumes.findIndex(c => c.name === n);
-        if (idx >= 0) {
-          stage.currentCostume = idx;
+        const n     = String(Sk.ffi.remapToJs(name));
+        const i     = stage.costumes.findIndex(c => c.name === n);
+        if (i >= 0) {
+          stage.currentCostume = i;
           Renderer.loadSpriteImage(stage).then(() => {
             UI.renderSpritePanel();
-            CostumePanel.load(stage);
             Scheduler.fireEvent('stage_loaded', 'all', n);
           });
         }
-        return none();
+        return noneV;
       }),
 
       next_stage: fn(() => {
         const stage = Engine.state.stage;
         if (stage.costumes.length > 1) {
           stage.currentCostume = (stage.currentCostume + 1) % stage.costumes.length;
-          Renderer.loadSpriteImage(stage).then(() => {
-            UI.renderSpritePanel();
-            CostumePanel.load(stage);
-          });
+          Renderer.loadSpriteImage(stage).then(() => UI.renderSpritePanel());
         }
-        return none();
+        return noneV;
       }),
 
-      set_size:    fn(v => { const sp=getSp(); if(sp) sp.size  = +Sk.ffi.remapToJs(v); return none(); }),
-      change_size: fn(v => { const sp=getSp(); if(sp) sp.size += +Sk.ffi.remapToJs(v); return none(); }),
-      show: fn(() => { const sp=getSp(); if(sp) sp.visible=true;  return none(); }),
-      hide: fn(() => { const sp=getSp(); if(sp) sp.visible=false; return none(); }),
+      set_size:    fn(v => { const sp=getSp(); if(sp) sp.size  = +Sk.ffi.remapToJs(v); return noneV; }),
+      change_size: fn(v => { const sp=getSp(); if(sp) sp.size += +Sk.ffi.remapToJs(v); return noneV; }),
+      show: fn(() => { const sp=getSp(); if(sp) sp.visible=true;  return noneV; }),
+      hide: fn(() => { const sp=getSp(); if(sp) sp.visible=false; return noneV; }),
 
-      // ── Control ────────────────────────────────────────────────
-      wait: fn(secs => makeSuspend(+Sk.ffi.remapToJs(secs))),
+      // ── Control ───────────────────────────────────────────────
+      // wait(0)  → frame-yield (resume next rAF)
+      // wait(N)  → timed yield (resume after N seconds, checked in rAF loop)
+      wait: fn(secs => {
+        const s = +Sk.ffi.remapToJs(secs);
+        return s <= 0 ? yieldSusp() : timedSusp(s);
+      }),
 
-      stop: fn(() => { Scheduler.stopAll(); return none(); }),
+      stop: fn(() => { Scheduler.stopAll(); return noneV; }),
 
       stop_this_thread: fn(() => {
         Scheduler.stopThread(spriteId, threadId);
         throw new Sk.builtin.SystemExit('stop_thread');
       }),
 
-      // ── Events ─────────────────────────────────────────────────
+      // ── Events ────────────────────────────────────────────────
       broadcast: fn(evtName => {
-        Scheduler.fireEvent('broadcast', 'all', Sk.ffi.remapToJs(evtName));
-        return none();
+        Scheduler.fireEvent('broadcast', 'all', String(Sk.ffi.remapToJs(evtName)));
+        return noneV;
       }),
 
       broadcast_and_wait: fn(evtName => {
-        const evt  = Sk.ffi.remapToJs(evtName);
-        const susp = new Sk.misceval.Suspension();
-        susp.data  = {
-          type: 'Sk.promise',
-          promise: Scheduler.fireEventAndWait('broadcast', 'all', evt)
-        };
-        susp.resume = () => none();
-        return susp;
+        const evt = String(Sk.ffi.remapToJs(evtName));
+        return promiseSusp(Scheduler.fireEventAndWait('broadcast', 'all', evt));
       }),
 
-      // ── Sensing ────────────────────────────────────────────────
+      // ── Sensing ───────────────────────────────────────────────
       touching: fn(target => {
         const sp = getSp(); if (!sp) return pyBool(false);
-        const t  = Sk.ffi.remapToJs(target);
+        const t  = String(Sk.ffi.remapToJs(target));
         if (t === 'edge' || t === 'the edge') return pyBool(Renderer.spriteOnEdge(sp));
-        if (t === 'mouse_pointer' || t === 'mouse') {
+        if (t === 'mouse_pointer' || t === 'mouse')
           return pyBool(Renderer.isPointInSprite(sp, Renderer.mouseX, Renderer.mouseY));
-        }
         const ts = Engine.getAllSprites().find(s => s.name === t || s.id === t);
         return pyBool(ts ? Renderer.spritesTouching(sp, ts) : false);
       }),
 
       touching_color: fn(hex => {
         const sp = getSp(); if (!sp || !sp._img) return pyBool(false);
-        // Sample pixels around sprite edges and check color match
         try {
-          const [tr, tg, tb] = Utils.hexToRgb(Sk.ffi.remapToJs(hex));
+          const [tr,tg,tb] = Utils.hexToRgb(String(Sk.ffi.remapToJs(hex)));
           const cv = document.getElementById('stage-canvas');
           const c  = cv.getContext('2d', { willReadFrequently: true });
-          const cx = sp.x + Renderer.STAGE_W / 2;
-          const cy = Renderer.STAGE_H / 2 - sp.y;
-          const hw = (sp._img.naturalWidth  * sp.size / 100) / 2;
-          const hh = (sp._img.naturalHeight * sp.size / 100) / 2;
-          // Sample 20 points along sprite bounding box perimeter
-          const pts = [];
-          for (let i = 0; i <= 4; i++) {
-            const t = i / 4;
-            pts.push([cx - hw + hw*2*t, cy - hh]);
-            pts.push([cx - hw + hw*2*t, cy + hh]);
-            pts.push([cx - hw, cy - hh + hh*2*t]);
-            pts.push([cx + hw, cy - hh + hh*2*t]);
-          }
-          for (const [px, py] of pts) {
-            const d = c.getImageData(Math.round(px), Math.round(py), 1, 1).data;
-            if (Math.abs(d[0]-tr)<30 && Math.abs(d[1]-tg)<30 && Math.abs(d[2]-tb)<30 && d[3]>10) {
-              return pyBool(true);
+          const hw = (sp._img.naturalWidth  * sp.size/100) / 2;
+          const hh = (sp._img.naturalHeight * sp.size/100) / 2;
+          const cx = sp.x + Renderer.STAGE_W/2;
+          const cy = Renderer.STAGE_H/2 - sp.y;
+          for (let i=0; i<=8; i++) {
+            const frac = i/8;
+            const pts = [
+              [cx-hw+hw*2*frac, cy-hh], [cx-hw+hw*2*frac, cy+hh],
+              [cx-hw, cy-hh+hh*2*frac], [cx+hw, cy-hh+hh*2*frac],
+            ];
+            for (const [px,py] of pts) {
+              const d = c.getImageData(Math.round(px), Math.round(py), 1, 1).data;
+              if (d[3]>10 && Math.abs(d[0]-tr)<30 && Math.abs(d[1]-tg)<30 && Math.abs(d[2]-tb)<30)
+                return pyBool(true);
             }
           }
         } catch(e) {}
@@ -258,7 +274,7 @@ const PythonAPI = (() => {
 
       distance_to: fn(target => {
         const sp = getSp(); if (!sp) return num(0);
-        const t  = Sk.ffi.remapToJs(target);
+        const t  = String(Sk.ffi.remapToJs(target));
         let tx, ty;
         if (t === 'mouse_pointer' || t === 'mouse') { tx=Renderer.mouseX; ty=Renderer.mouseY; }
         else {
@@ -270,185 +286,140 @@ const PythonAPI = (() => {
       }),
 
       ask: fn(msg => {
-        const sp = getSp();
-        const spriteName = sp ? sp.name : 'PyScratch';
-        const message    = Sk.ffi.remapToJs(msg);
-        const susp = new Sk.misceval.Suspension();
-        susp.data  = { type: 'Sk.promise', promise: InputSystem.showAsk(spriteName, message) };
-        susp.resume = v => pyStr(v);
-        return susp;
+        const sp   = getSp();
+        const name = sp ? sp.name : 'PyScratch';
+        return promiseSusp(
+          InputSystem.showAsk(name, String(Sk.ffi.remapToJs(msg))),
+          v => pyStr(v)
+        );
       }),
 
-      key_pressed: fn(key => pyBool(InputSystem.isKeyDown(Sk.ffi.remapToJs(key)))),
+      key_pressed: fn(key => pyBool(InputSystem.isKeyDown(String(Sk.ffi.remapToJs(key))))),
       mouse_x:     fn(() => num(Renderer.mouseX)),
       mouse_y:     fn(() => num(Renderer.mouseY)),
       mouse_down:  fn(() => pyBool(Renderer.mouseDown)),
 
-      // ── Variables ──────────────────────────────────────────────
+      // ── Variables ─────────────────────────────────────────────
       set_var: fn((name, value) => {
-        Engine.setGlobal(Sk.ffi.remapToJs(name), Sk.ffi.remapToJs(value));
-        return none();
+        Engine.setGlobal(String(Sk.ffi.remapToJs(name)), Sk.ffi.remapToJs(value));
+        return noneV;
       }),
       get_var: fn(name => {
-        const v = Engine.getGlobal(Sk.ffi.remapToJs(name));
+        const v = Engine.getGlobal(String(Sk.ffi.remapToJs(name)));
         return typeof v === 'number' ? num(v) : pyStr(v);
       }),
       set_sprite_var: fn((name, value) => {
-        Engine.setSpriteVar(spriteId, Sk.ffi.remapToJs(name), Sk.ffi.remapToJs(value));
-        return none();
+        Engine.setSpriteVar(spriteId, String(Sk.ffi.remapToJs(name)), Sk.ffi.remapToJs(value));
+        return noneV;
       }),
       get_sprite_var: fn(name => {
-        const v = Engine.getSpriteVar(spriteId, Sk.ffi.remapToJs(name));
+        const v = Engine.getSpriteVar(spriteId, String(Sk.ffi.remapToJs(name)));
         return typeof v === 'number' ? num(v) : pyStr(v);
       }),
       display_variable: fn((name, visible) => {
-        Engine.displayVariable(Sk.ffi.remapToJs(name), Sk.ffi.remapToJs(visible), spriteId);
-        return none();
+        Engine.displayVariable(String(Sk.ffi.remapToJs(name)), Sk.ffi.remapToJs(visible), spriteId);
+        return noneV;
       }),
 
-      // ── Clones ─────────────────────────────────────────────────
+      // ── Clones ────────────────────────────────────────────────
       create_clone: fn(() => {
-        const sp = getSp(); if (!sp) return none();
+        const sp = getSp(); if (!sp) return noneV;
         const clone = Engine.createSprite({
           ...sp,
-          id:       Utils.uid(),
-          isClone:  true,
-          cloneOf:  sp.id,
-          threads:  sp.threads.map(t => ({ ...t })),
-          variables: { ...sp.variables },
-          costumes: sp.costumes.map(c => ({ ...c })),
+          id: Utils.uid(), isClone: true, cloneOf: sp.id,
+          threads:   sp.threads.map(t  => ({...t})),
+          variables: {...sp.variables},
+          costumes:  sp.costumes.map(c => ({...c})),
         });
-        clone._img   = sp._img;
-        clone._emoji = sp._emoji;
+        clone._img = sp._img; clone._emoji = sp._emoji;
         Engine.state.sprites.push(clone);
         Scheduler.startSpriteThreads(clone, 'clone_start');
-        return none();
+        return noneV;
       }),
 
       delete_clone: fn(() => {
         const sp = getSp();
-        if (sp && sp.isClone) {
-          Scheduler.stopSpriteThreads(sp.id);
-          Engine.deleteSprite(sp.id);
-        }
-        return none();
+        if (sp && sp.isClone) { Scheduler.stopSpriteThreads(sp.id); Engine.deleteSprite(sp.id); }
+        return noneV;
       }),
 
-      // ── Layering ───────────────────────────────────────────────
-      go_to_front:     fn(() => { Engine.moveToFront(spriteId);    return none(); }),
-      go_back_layers:  fn(n  => { Engine.moveBackLayers(spriteId, +Sk.ffi.remapToJs(n)); return none(); }),
+      // ── Layering ──────────────────────────────────────────────
+      go_to_front:    fn(()  => { Engine.moveToFront(spriteId); return noneV; }),
+      go_back_layers: fn(n   => { Engine.moveBackLayers(spriteId, +Sk.ffi.remapToJs(n)); return noneV; }),
 
-      // ── Sound ──────────────────────────────────────────────────
-      play_sound:      fn(name => { SoundSystem.play(Sk.ffi.remapToJs(name)); return none(); }),
-      stop_all_sounds: fn(()   => { SoundSystem.stopAll(); return none(); }),
-      set_volume:      fn(v    => { SoundSystem.setVolume(+Sk.ffi.remapToJs(v)); return none(); }),
+      // ── Sound ─────────────────────────────────────────────────
+      play_sound:      fn(name => { SoundSystem.play(String(Sk.ffi.remapToJs(name))); return noneV; }),
+      stop_all_sounds: fn(()   => { SoundSystem.stopAll(); return noneV; }),
+      set_volume:      fn(v    => { SoundSystem.setVolume(+Sk.ffi.remapToJs(v)); return noneV; }),
 
-      // ── Lists ───────────────────────────────────────────────────
-      list_create: fn(name  => { Engine.listCreate(Sk.ffi.remapToJs(name)); return none(); }),
-      list_add:    fn((n,v) => { Engine.listAdd(Sk.ffi.remapToJs(n), Sk.ffi.remapToJs(v)); return none(); }),
-      list_remove: fn((n,i) => { Engine.listRemove(Sk.ffi.remapToJs(n), +Sk.ffi.remapToJs(i)); return none(); }),
-      list_get:    fn((n,i) => {
-        const v = Engine.listGet(Sk.ffi.remapToJs(n), +Sk.ffi.remapToJs(i));
-        if (v === undefined) return Sk.builtin.none.none$;
+      // ── Lists ─────────────────────────────────────────────────
+      list_create: fn(name    => { Engine.listCreate(String(Sk.ffi.remapToJs(name))); return noneV; }),
+      list_add:    fn((n,v)   => { Engine.listAdd(String(Sk.ffi.remapToJs(n)), Sk.ffi.remapToJs(v)); return noneV; }),
+      list_remove: fn((n,i)   => { Engine.listRemove(String(Sk.ffi.remapToJs(n)), +Sk.ffi.remapToJs(i)); return noneV; }),
+      list_get:    fn((n,i)   => {
+        const v = Engine.listGet(String(Sk.ffi.remapToJs(n)), +Sk.ffi.remapToJs(i));
+        if (v === undefined) return noneV;
         return typeof v === 'number' ? num(v) : pyStr(v);
       }),
 
-      // ── Math / Misc ────────────────────────────────────────────
-      random:     fn((a,b) => num(Math.random() * (+Sk.ffi.remapToJs(b) - +Sk.ffi.remapToJs(a)) + +Sk.ffi.remapToJs(a))),
-      random_int: fn((a,b) => new Sk.builtin.int_(
-        Math.floor(Math.random() * (+Sk.ffi.remapToJs(b) - +Sk.ffi.remapToJs(a) + 1)) + +Sk.ffi.remapToJs(a)
-      )),
-      timer:       fn(() => num((Date.now() - Scheduler.startTime) / 1000)),
-      reset_timer: fn(() => { Scheduler.startTime = Date.now(); return none(); }),
+      // ── Math / timer ──────────────────────────────────────────
+      random: fn((a,b) => {
+        const lo=+Sk.ffi.remapToJs(a), hi=+Sk.ffi.remapToJs(b);
+        return num(Math.random()*(hi-lo)+lo);
+      }),
+      random_int: fn((a,b) => {
+        const lo=+Sk.ffi.remapToJs(a), hi=+Sk.ffi.remapToJs(b);
+        return new Sk.builtin.int_(Math.floor(Math.random()*(hi-lo+1))+lo);
+      }),
+      timer:       fn(() => num((performance.now() - Scheduler.startTime) / 1000)),
+      reset_timer: fn(() => { Scheduler.startTime = performance.now(); return noneV; }),
     };
 
     return api;
   }
 
-  function configure() {
-    Sk.configure({
-      output: text => console.log('[PyScratch]', text),
-      read: x => {
-        if (Sk.builtinFiles && Sk.builtinFiles.files[x] !== undefined)
-          return Sk.builtinFiles.files[x];
-        throw `File not found: '${x}'`;
-      },
-      execLimit: 200000,
-      __future__: Sk.python3,
-    });
-  }
-
-  async function runCode(code, spriteId, threadId) {
-    configure();
-    const api = buildModule(spriteId, threadId);
-
-    // Inject all API functions as Skulpt builtins (accessible without import)
-    for (const [k, v] of Object.entries(api)) {
-      Sk.builtins[k] = v;
-    }
-
-    try {
-      await Sk.misceval.asyncToPromise(() =>
-        Sk.importMainWithBody('<main>', false, code, true)
-      );
-    } catch (err) {
-      if (err instanceof Sk.builtin.SystemExit) return;
-      const msg = err.toString ? err.toString() : String(err);
-      if (msg.includes('stop_thread') || msg.includes('stop')) return;
-      throw err;
-    }
-  }
-
-  return { buildModule, runCode, configure };
+  return { buildModule };
 })();
 
 // ── Sound System ──────────────────────────────────────────────────
 const SoundSystem = (() => {
-  let volume = 0.5;
-  function play(name) {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const g   = ctx.createGain();
-      osc.connect(g); g.connect(ctx.destination);
-      g.gain.setValueAtTime(volume * 0.15, ctx.currentTime);
-      osc.frequency.setValueAtTime(440, ctx.currentTime);
-      osc.start(); osc.stop(ctx.currentTime + 0.15);
-    } catch(e) {}
-  }
+  let vol = 0.5;
   return {
-    play,
-    stopAll:   () => {},
-    setVolume: v => { volume = Utils.clamp(v / 100, 0, 1); },
+    play() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const g   = ctx.createGain();
+        osc.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(vol * 0.15, ctx.currentTime);
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.start(); osc.stop(ctx.currentTime + 0.15);
+      } catch(e) {}
+    },
+    stopAll()    {},
+    setVolume(v) { vol = Math.max(0, Math.min(1, v/100)); },
   };
 })();
 
 // ── Input System ──────────────────────────────────────────────────
 const InputSystem = (() => {
   const keys = new Set();
+  const KEY_MAP = {
+    arrowup:'up', arrowdown:'down', arrowleft:'left', arrowright:'right',
+    ' ':'space', enter:'enter', escape:'escape',
+  };
+  const norm = raw => { const k=raw.toLowerCase(); return KEY_MAP[k]||k; };
 
   window.addEventListener('keydown', e => {
-    const k = normaliseKey(e);
+    const k = norm(e.key);
     keys.add(k);
+    if (document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.tagName === 'TEXTAREA') return;
     Scheduler.fireEvent('keypress', 'all', k);
   });
-  window.addEventListener('keyup', e => keys.delete(normaliseKey(e)));
+  window.addEventListener('keyup', e => keys.delete(norm(e.key)));
 
-  function normaliseKey(e) {
-    const map = {
-      ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right',
-      ' ':'space', Enter:'enter', Escape:'escape',
-    };
-    return (map[e.key] || e.key).toLowerCase();
-  }
-
-  function isKeyDown(key) {
-    const map = {
-      arrowup:'up', arrowdown:'down', arrowleft:'left', arrowright:'right',
-    };
-    const k = (map[key.toLowerCase()] || key).toLowerCase();
-    return keys.has(k);
-  }
+  function isKeyDown(key) { return keys.has(norm(key)); }
 
   function showAsk(spriteName, message) {
     return new Promise(resolve => {
@@ -456,19 +427,15 @@ const InputSystem = (() => {
       const msgEl   = document.getElementById('ask-message');
       const input   = document.getElementById('ask-input');
       const submit  = document.getElementById('ask-submit');
-
       msgEl.textContent = `${spriteName} asks: ${message}`;
       input.value = '';
       overlay.classList.remove('hidden');
-      input.focus();
-
+      setTimeout(() => input.focus(), 50);
       const done = () => {
         overlay.classList.add('hidden');
-        submit.onclick = null;
-        input.onkeydown = null;
+        submit.onclick = null; input.onkeydown = null;
         resolve(input.value);
       };
-
       submit.onclick  = done;
       input.onkeydown = e => { if (e.key === 'Enter') done(); };
     });

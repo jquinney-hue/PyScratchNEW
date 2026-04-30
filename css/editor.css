@@ -1,4 +1,4 @@
-/* ── CODE TAB ──────────────────────────────────────────────────── */
+/* ── CODE TAB ────────────────────────────────────────────────────── */
 #tab-code {
   display: flex;
   flex-direction: column;
@@ -6,11 +6,12 @@
   overflow: hidden;
 }
 
+/* ── THREAD PANEL ────────────────────────────────────────────────── */
 #thread-panel {
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-mid);
   max-height: 160px;
-  min-height: 60px;
+  min-height: 56px;
   display: flex;
   flex-direction: column;
 }
@@ -19,20 +20,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
+  padding: 5px 10px;
   background: var(--bg-panel2);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
-#thread-list {
-  overflow-y: auto;
-  flex: 1;
-}
+#thread-list { overflow-y: auto; flex: 1; }
 
 .thread-item {
   display: flex;
@@ -40,40 +39,40 @@
   padding: 6px 10px;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
-  transition: background 0.1s;
   gap: 8px;
+  transition: background 0.1s;
 }
 .thread-item:hover { background: var(--bg-panel3); }
 .thread-item.active {
-  background: var(--accent2-dim);
-  border-left: 3px solid var(--accent2);
+  background: var(--accent-bg);
+  border-left: 3px solid var(--scratch-purple);
   padding-left: 7px;
 }
 
 .thread-dot {
   width: 7px; height: 7px;
   border-radius: 50%;
-  background: var(--text-muted);
+  background: var(--border-strong);
   flex-shrink: 0;
   transition: background 0.2s, box-shadow 0.2s;
 }
 .thread-item.running .thread-dot {
   background: var(--green);
-  box-shadow: 0 0 5px var(--green);
+  box-shadow: 0 0 5px hsla(133,55%,47%,0.5);
 }
 .thread-item.error .thread-dot { background: var(--red); }
 
 .thread-name {
   flex: 1;
   font-size: 12px;
-  color: var(--text);
   font-family: var(--font-mono);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ── EDITOR PANEL ─────────────────────────────────────────────── */
+/* ── CODE EDITOR ─────────────────────────────────────────────────── */
 #editor-panel {
   flex: 1;
   display: flex;
@@ -88,13 +87,14 @@
   background: var(--bg-panel2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  min-height: 26px;
 }
 
 #current-thread-label {
   font-size: 11px;
-  color: var(--accent2);
+  font-weight: bold;
+  color: var(--scratch-purple);
   font-family: var(--font-mono);
-  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -105,12 +105,13 @@
   display: flex;
   overflow: hidden;
   position: relative;
+  background: var(--bg-input);
 }
 
 #line-numbers {
   width: 40px;
   min-width: 40px;
-  background: var(--bg-input);
+  background: var(--bg-panel2);
   border-right: 1px solid var(--border);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -130,23 +131,25 @@
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
-  padding: 10px;
+  padding: 10px 12px;
   border: none;
   resize: none;
   overflow-y: auto;
   overflow-x: auto;
   tab-size: 4;
   white-space: pre;
-  caret-color: var(--accent);
+  caret-color: var(--scratch-purple);
 }
 #code-editor:focus { outline: none; }
+#code-editor::selection { background: hsla(260, 60%, 60%, 0.18); }
 
+/* Error banner */
 #error-overlay {
   position: absolute;
   bottom: 0; left: 0; right: 0;
-  background: #1a0a0a;
+  background: hsl(0, 80%, 97%);
   border-top: 2px solid var(--red);
-  padding: 8px 12px;
+  padding: 7px 12px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--red);
@@ -156,7 +159,7 @@
   z-index: 10;
 }
 
-/* ── COSTUMES TAB ─────────────────────────────────────────────── */
+/* ── COSTUMES TAB ────────────────────────────────────────────────── */
 #tab-costumes {
   display: flex;
   flex-direction: column;
@@ -172,13 +175,13 @@
 }
 
 .costume-section-header {
-  padding: 8px 10px;
+  padding: 7px 10px;
   background: var(--bg-panel2);
-  border-bottom: 1px solid var(--border);
-  font-size: 11px;
-  font-weight: 700;
+  border-bottom: 1px solid var(--border-mid);
+  font-size: 10px;
+  font-weight: bold;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   color: var(--text-muted);
   flex-shrink: 0;
 }
@@ -192,29 +195,30 @@
   gap: 4px;
 }
 
-/* Each costume row */
+/* Costume rows */
 .costume-item {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
-  background: var(--bg-panel3);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.12s, background 0.12s;
 }
-.costume-item:hover { border-color: var(--border-light); }
+.costume-item:hover { border-color: var(--border-mid); background: var(--bg-panel2); }
 .costume-item.active {
-  border-color: var(--accent);
-  background: var(--accent-dim);
+  border-color: var(--scratch-purple);
+  background: var(--accent-bg);
 }
 
 .costume-thumb-img {
   width: 36px; height: 36px;
   flex-shrink: 0;
-  background: var(--bg-input);
-  border-radius: 4px;
+  background: var(--bg-panel2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -232,22 +236,29 @@
   min-width: 0;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 3px;
   color: var(--text);
+  font-family: var(--font-ui);
 }
-.costume-name-input:hover { border-color: var(--border); background: var(--bg-input); }
-.costume-name-input:focus { border-color: var(--accent2); background: var(--bg-input); }
+.costume-name-input:hover {
+  border-color: var(--border-mid);
+  background: var(--bg-input);
+}
+.costume-name-input:focus {
+  border-color: var(--scratch-purple);
+  background: var(--bg-input);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
 
-/* Add button at bottom of list */
+/* Add row at bottom of costume list */
 .costume-add-row {
   margin-top: 4px;
-  display: flex;
-  justify-content: center;
-  padding: 4px 0 2px;
+  padding: 2px 0 4px;
 }
-.costume-add-btn { width: 100%; }
+.costume-add-btn { width: 100%; justify-content: center; }
 
-/* ── LIBRARY BROWSER GRID ─────────────────────────────────────── */
+/* ── LIBRARY BROWSER GRID ────────────────────────────────────────── */
 .costume-library-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -258,17 +269,20 @@
 .costume-library-cell {
   border: 2px solid var(--border);
   border-radius: var(--radius);
-  padding: 6px;
+  padding: 8px 6px 6px;
   cursor: pointer;
   text-align: center;
-  background: var(--bg-panel3);
-  transition: border-color 0.15s;
+  background: var(--bg-panel2);
+  transition: border-color 0.12s, background 0.12s;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
-.costume-library-cell:hover { border-color: var(--accent); }
+.costume-library-cell:hover {
+  border-color: var(--scratch-purple);
+  background: var(--accent-bg);
+}
 .costume-library-cell img {
   width: 60px; height: 60px;
   object-fit: contain;
@@ -281,3 +295,96 @@
   white-space: nowrap;
   width: 100%;
 }
+
+
+/* ── INTELLISENSE POPUP ─────────────────────────────────────────── */
+/* Fixed to body so it is never clipped by overflow:hidden parents  */
+#ac-popup {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  display: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.ac-row {
+  display: grid;
+  grid-template-columns: 18px 140px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 0 8px;
+  padding: 5px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.07s;
+  min-height: 30px;
+}
+.ac-row:last-child { border-bottom: none; }
+.ac-row:hover { background: var(--bg-panel2); }
+.ac-row.ac-sel {
+  background: var(--accent-bg);
+  border-left: 3px solid var(--scratch-purple);
+  padding-left: 7px;
+}
+
+/* Kind icon column */
+.ac-kind {
+  font-size: 11px;
+  font-weight: bold;
+  text-align: center;
+  grid-row: 1;
+}
+.ac-kind-fn   { color: var(--scratch-purple); }
+.ac-kind-kw   { color: hsl(30, 80%, 50%); }
+.ac-kind-snip { color: hsl(160, 60%, 40%); }
+
+/* Name column */
+.ac-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  grid-row: 1;
+}
+.ac-row.ac-sel .ac-name { color: var(--scratch-purple); }
+
+/* Params — shown beside name */
+.ac-params {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Signature preview (right side) */
+.ac-sig {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  grid-row: 1;
+}
+
+/* Doc string below — spans all columns */
+.ac-doc {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-top: 1px;
+  display: none; /* show only on selected row to keep list compact */
+}
+.ac-row.ac-sel .ac-doc { display: block; color: var(--text-dim); }
