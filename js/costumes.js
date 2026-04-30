@@ -63,38 +63,52 @@ const CostumePanel = (() => {
     const list = document.getElementById('costume-list');
     list.innerHTML = '';
 
+    if (sprite.costumes.length === 0) {
+      list.innerHTML = '<div class="costume-empty">No costumes yet.<br>Click <strong>+ Add</strong> above to add one.</div>';
+      return;
+    }
+
     sprite.costumes.forEach((costume, i) => {
+      const isActive = i === sprite.currentCostume;
       const item = document.createElement('div');
-      item.className = 'costume-item' + (i === sprite.currentCostume ? ' active' : '');
+      item.className = 'costume-item' + (isActive ? ' active' : '');
       item.dataset.index = i;
 
       // Thumbnail
       const thumb = document.createElement('div');
       thumb.className = 'costume-thumb-img';
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.style.cssText = 'width:36px;height:36px;object-fit:contain;';
       if (costume.url) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.style.cssText = 'width:48px;height:48px;object-fit:contain;';
         img.src = costume.url;
-        img.onerror = () => { img.replaceWith(makeFallbackEmoji()); };
+        img.onerror = () => thumb.appendChild(makeFallbackEmoji());
+        thumb.appendChild(img);
       } else {
         thumb.appendChild(makeFallbackEmoji());
       }
-      if (costume.url) thumb.appendChild(img);
 
-      // Editable name
+      // Info column — name + active badge
+      const info = document.createElement('div');
+      info.className = 'costume-item-info';
+
       const nameEl = document.createElement('input');
       nameEl.type = 'text';
       nameEl.className = 'costume-name-input';
       nameEl.value = costume.name;
-      nameEl.addEventListener('change', () => {
-        costume.name = nameEl.value.trim() || costume.name;
-      });
+      nameEl.addEventListener('change', () => { costume.name = nameEl.value.trim() || costume.name; });
       nameEl.addEventListener('click', e => e.stopPropagation());
 
-      // Delete button (bin icon)
+      const badge = document.createElement('div');
+      badge.className = 'costume-active-badge';
+      badge.textContent = 'Active';
+
+      info.appendChild(nameEl);
+      info.appendChild(badge);
+
+      // Delete button
       const del = document.createElement('button');
-      del.className = 'btn-icon';
+      del.className = 'costume-delete-btn';
       del.title = 'Delete costume';
       del.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
       del.addEventListener('click', e => {
@@ -106,10 +120,9 @@ const CostumePanel = (() => {
       });
 
       item.appendChild(thumb);
-      item.appendChild(nameEl);
+      item.appendChild(info);
       item.appendChild(del);
 
-      // Click row to select costume
       item.addEventListener('click', () => {
         sprite.currentCostume = i;
         _afterCostumeChange(sprite);
@@ -117,19 +130,6 @@ const CostumePanel = (() => {
 
       list.appendChild(item);
     });
-
-    // ── Add (+) button at the bottom ──────────────────────────
-    const addRow = document.createElement('div');
-    addRow.className = 'costume-add-row';
-
-    const addBtn = document.createElement('button');
-    addBtn.className = 'btn btn-sm btn-accent costume-add-btn';
-    addBtn.title = 'Add costume';
-    addBtn.innerHTML = '+ Add Costume';
-    addBtn.addEventListener('click', () => showAddOptions(sprite));
-
-    addRow.appendChild(addBtn);
-    list.appendChild(addRow);
   }
 
   function makeFallbackEmoji() {
@@ -245,7 +245,14 @@ const CostumePanel = (() => {
   }
 
   function initControls() {
-    // Nothing to wire globally — controls are created dynamically per sprite
+    // Wire the fixed header add button
+    const headerBtn = document.getElementById('btn-add-costume-header');
+    if (headerBtn) {
+      headerBtn.addEventListener('click', () => {
+        const sprite = Engine.getSelectedSprite();
+        if (sprite) showAddOptions(sprite);
+      });
+    }
   }
 
   return { preload, load, initControls };

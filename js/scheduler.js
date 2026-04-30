@@ -373,7 +373,7 @@ const Scheduler = (() => {
   function _updateThreadUI() {
     const sel = Engine.getSelectedSprite();
     if (!sel) return;
-    document.querySelectorAll('.thread-item').forEach(el => {
+    document.querySelectorAll('.thread-tab').forEach(el => {
       const tid = el.dataset.threadId;
       const alive = activeThreads.some(t => t.spriteId===sel.id && t.threadId===tid && !t.dead);
       el.classList.toggle('running', alive);

@@ -635,7 +635,7 @@ const Editor = (() => {
     document.getElementById('ctx-rename').addEventListener('click', renameThread);
     document.getElementById('ctx-delete').addEventListener('click', deleteThread);
     document.addEventListener('click', e => {
-      if (!e.target.closest('#context-menu') && !e.target.closest('.thread-item')) hideContextMenu();
+      if (!e.target.closest('#context-menu') && !e.target.closest('.thread-tab')) hideContextMenu();
     });
 
     _syncLines();
@@ -671,21 +671,40 @@ const Editor = (() => {
     m.style.left=x+'px'; m.style.top=y+'px'; m.classList.remove('hidden');
   }
 
-  // ── Thread list ───────────────────────────────────────────────
+  // ── Thread tab bar ───────────────────────────────────────────
   function renderThreadList(sprite) {
-    const list=document.getElementById('thread-list');
-    if(!sprite){list.innerHTML=''; return;}
-    list.innerHTML=sprite.threads.map(t=>`
-      <div class="thread-item ${t.id===currentThreadId?'active':''}" data-thread-id="${t.id}">
-        <div class="thread-dot"></div>
-        <div class="thread-name">${_esc(t.name)}</div>
+    const tabs = document.getElementById('thread-tabs');
+    if (!sprite) { tabs.innerHTML = ''; return; }
+
+    tabs.innerHTML = sprite.threads.map(t => `
+      <div class="thread-tab ${t.id===currentThreadId?'active':''}" data-thread-id="${t.id}" title="${_esc(t.name)}">
+        <div class="thread-tab-dot"></div>
+        <span class="thread-tab-name">${_esc(t.name)}</span>
+        <button class="thread-tab-close" data-close-id="${t.id}" title="Delete thread">×</button>
       </div>`).join('');
-    list.querySelectorAll('.thread-item').forEach(el=>{
-      el.addEventListener('click', ()=>selectThread(sprite, el.dataset.threadId));
-      el.addEventListener('contextmenu', e=>{
-        e.preventDefault(); contextTarget=el.dataset.threadId; showContextMenu(e.clientX, e.clientY);
+
+    tabs.querySelectorAll('.thread-tab').forEach(el => {
+      el.addEventListener('click', e => {
+        if (e.target.closest('.thread-tab-close')) return;
+        selectThread(sprite, el.dataset.threadId);
+      });
+      el.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        contextTarget = el.dataset.threadId;
+        showContextMenu(e.clientX, e.clientY);
       });
     });
+
+    tabs.querySelectorAll('.thread-tab-close').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        contextTarget = btn.dataset.closeId;
+        deleteThread();
+      });
+    });
+
+    const active = tabs.querySelector('.thread-tab.active');
+    if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
   // ── Select / load ─────────────────────────────────────────────
@@ -696,7 +715,6 @@ const Editor = (() => {
     const ta=_ta();
     ta.value=thread.code||'';
     if(_getHist(threadId).stack.length===0) _pushHist(ta.value,0,0);
-    document.getElementById('current-thread-label').textContent=`${sprite.name} → ${thread.name}`;
     _syncLines(); renderThreadList(sprite);
     AC.hide(); SigHelp.hide(); _clearTabStops();
     document.getElementById('error-overlay').classList.add('hidden');
@@ -705,8 +723,7 @@ const Editor = (() => {
   function loadSprite(sprite) {
     if(!sprite){
       _ta().value='';
-      document.getElementById('thread-list').innerHTML='';
-      document.getElementById('current-thread-label').textContent='';
+      document.getElementById('thread-tabs').innerHTML='';
       return;
     }
     if(!sprite.threads||sprite.threads.length===0)

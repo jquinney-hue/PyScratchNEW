@@ -61,17 +61,15 @@
 
         <!-- Code Tab -->
         <div id="tab-code" class="tab-content active">
-          <div id="thread-panel">
-            <div class="thread-panel-header">
-              <span>Threads</span>
-              <button class="btn-icon" id="btn-add-thread" title="Add thread">+</button>
-            </div>
-            <div id="thread-list"></div>
+          <!-- Thread tab bar — like VS Code tabs -->
+          <div id="thread-tabbar">
+            <div id="thread-tabs"></div>
+            <button class="thread-add-btn" id="btn-add-thread" title="New thread">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
           </div>
+          <!-- Editor -->
           <div id="editor-panel">
-            <div id="editor-toolbar">
-              <span id="current-thread-label">Select a sprite</span>
-            </div>
             <div id="code-editor-wrapper">
               <div id="line-numbers"></div>
               <textarea id="code-editor" spellcheck="false" placeholder="# Write Python here&#10;def game_start():&#10;    while True:&#10;        move_steps(3)&#10;        if on_edge():&#10;            bounce()&#10;        wait(0.016)"></textarea>
@@ -83,8 +81,12 @@
         <!-- Costumes Tab -->
         <div id="tab-costumes" class="tab-content">
           <div id="costume-panel">
-            <div class="costume-section-header">
+            <div id="costume-header">
               <span id="costume-panel-title">Costumes</span>
+              <button class="btn btn-sm btn-accent" id="btn-add-costume-header">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add
+              </button>
             </div>
             <div id="costume-list"></div>
           </div>
