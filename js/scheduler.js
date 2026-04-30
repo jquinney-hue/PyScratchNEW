@@ -79,11 +79,17 @@ const Scheduler = (() => {
     for (const t of activeThreads) t.dead = true;
     activeThreads = [];
 
+    // Remove all clones — they only exist at runtime
+    Engine.state.sprites = Engine.state.sprites.filter(s => !s.isClone);
+
+    // Clear say bubbles on all remaining sprites and stage
     for (const sp of [...Engine.getAllSprites(), Engine.state.stage]) {
       sp._sayText = null;
       if (sp._sayTimer) { clearTimeout(sp._sayTimer); sp._sayTimer = null; }
     }
 
+    Renderer.markSortDirty();
+    UI.renderSpritePanel();
     _updateThreadUI();
     Renderer.render();
   }

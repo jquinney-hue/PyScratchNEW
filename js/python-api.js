@@ -369,12 +369,19 @@ const PythonAPI = (() => {
         });
         clone._img = sp._img; clone._emoji = sp._emoji;
         Engine.state.sprites.push(clone);
+        Renderer.markSortDirty();
+        UI.renderSpritePanel();
         Scheduler.startSpriteThreads(clone, 'clone_start');
         return _noneV;
       }),
       delete_clone: fn(() => {
         const sp = getSp();
-        if (sp && sp.isClone) { Scheduler.stopSpriteThreads(sp.id); Engine.deleteSprite(sp.id); }
+        if (sp && sp.isClone) {
+          Scheduler.stopSpriteThreads(sp.id);
+          Engine.deleteSprite(sp.id);
+          Renderer.markSortDirty();
+          UI.renderSpritePanel();
+        }
         return _noneV;
       }),
 
