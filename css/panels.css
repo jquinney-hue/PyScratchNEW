@@ -286,3 +286,14 @@
 /* ── RUNNING STATE ── */
 body.running #btn-start { opacity: 0.5; pointer-events: none; }
 body.running #stage-canvas { cursor: default; }
+
+/* ── PROP NAME (wider) ──────────────────────────────────────────── */
+.prop-name {
+  flex: 1;
+  padding: 3px 6px;
+}
+
+/* ── Stage placeholder ──────────────────────────────────────────── */
+#sprite-panel-top {
+  min-height: 0;
+}

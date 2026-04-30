@@ -5,107 +5,91 @@ const Renderer = (() => {
   const STAGE_H = 360;
 
   let canvas, ctx;
-  let scale = 1;
+  let _scale = 1;
   let mouseX = 0, mouseY = 0;
   let mouseDown = false;
 
-  // Speech bubbles: spriteId -> { text, timer }
-  const bubbles = {};
-
+  // ── Init ──────────────────────────────────────────────────────
   function init(canvasEl) {
     canvas = canvasEl;
-    ctx = canvas.getContext('2d');
+    ctx    = canvas.getContext('2d', { willReadFrequently: true });
     resize();
-    window.addEventListener('resize', resize);
+    window.addEventListener('resize', () => { resize(); render(); });
 
-    canvas.addEventListener('mousemove', onMouseMove);
-    canvas.addEventListener('mousedown', () => { mouseDown = true; });
-    canvas.addEventListener('mouseup', () => { mouseDown = false; });
-    canvas.addEventListener('click', onCanvasClick);
+    canvas.addEventListener('mousemove',  onMouseMove);
+    canvas.addEventListener('mousedown',  () => { mouseDown = true; });
+    canvas.addEventListener('mouseup',    () => { mouseDown = false; });
+    canvas.addEventListener('mouseleave', () => { mouseDown = false; });
+    canvas.addEventListener('click',      onCanvasClick);
   }
 
   function resize() {
-    const container = canvas.parentElement;
-    const area = container.parentElement;
-    const maxW = area.clientWidth - 2;
-    const maxH = area.clientHeight - 30; // minus controls
-    const scaleW = maxW / STAGE_W;
-    const scaleH = maxH / STAGE_H;
-    scale = Math.min(scaleW, scaleH, 2);
+    const area = canvas.closest('#stage-area');
+    if (!area) return;
+    const maxW = area.clientWidth;
+    const maxH = area.clientHeight - 28; // minus stage-controls bar
+    const scaleW = maxW  / STAGE_W;
+    const scaleH = maxH  / STAGE_H;
+    _scale = Math.min(scaleW, scaleH, 2);
+    if (_scale <= 0) _scale = 1;
 
-    canvas.width = STAGE_W;
+    canvas.width  = STAGE_W;
     canvas.height = STAGE_H;
-    canvas.style.width = (STAGE_W * scale) + 'px';
-    canvas.style.height = (STAGE_H * scale) + 'px';
+    canvas.style.width  = Math.floor(STAGE_W * _scale) + 'px';
+    canvas.style.height = Math.floor(STAGE_H * _scale) + 'px';
   }
 
+  function getScale() { return _scale; }
+
+  // ── Mouse ──────────────────────────────────────────────────────
   function onMouseMove(e) {
     const rect = canvas.getBoundingClientRect();
-    const px = (e.clientX - rect.left) / scale;
-    const py = (e.clientY - rect.top) / scale;
-    mouseX = px - STAGE_W / 2;
-    mouseY = -(py - STAGE_H / 2);
-    document.getElementById('mouse-coords').textContent =
-      `x: ${Math.round(mouseX)}, y: ${Math.round(mouseY)}`;
+    mouseX =  (e.clientX - rect.left)  / _scale - STAGE_W / 2;
+    mouseY = -((e.clientY - rect.top)  / _scale - STAGE_H / 2);
+    const coordEl = document.getElementById('mouse-coords');
+    if (coordEl) coordEl.textContent = `x: ${Math.round(mouseX)}, y: ${Math.round(mouseY)}`;
   }
 
   function onCanvasClick(e) {
     if (!Engine.state.running) return;
     const rect = canvas.getBoundingClientRect();
-    const px = (e.clientX - rect.left) / scale;
-    const py = (e.clientY - rect.top) / scale;
-    const mx = px - STAGE_W / 2;
-    const my = -(py - STAGE_H / 2);
+    const cx = (e.clientX - rect.left) / _scale - STAGE_W / 2;
+    const cy = -((e.clientY - rect.top) / _scale - STAGE_H / 2);
 
-    // Fire click events for sprites under cursor
-    const sprites = Engine.getSortedSprites().reverse();
+    const sprites = Engine.getSortedSprites().slice().reverse();
     for (const sprite of sprites) {
       if (!sprite.visible) continue;
-      if (isPointInSprite(sprite, mx, my)) {
+      if (isPointInSprite(sprite, cx, cy)) {
         Scheduler.fireEvent('click', sprite.id);
       }
     }
     Scheduler.fireEvent('stage_click', 'stage');
   }
 
-  function isPointInSprite(sprite, px, py) {
-    const img = sprite._img;
-    if (!img) return false;
-    const w = (img.width || 40) * (sprite.size / 100);
-    const h = (img.height || 40) * (sprite.size / 100);
-    return (
-      px >= sprite.x - w / 2 &&
-      px <= sprite.x + w / 2 &&
-      py >= sprite.y - h / 2 &&
-      py <= sprite.y + h / 2
-    );
-  }
-
-  // ── Main render ───────────────────────────────────────────────
+  // ── Main render ────────────────────────────────────────────────
   function render() {
+    if (!ctx) return;
     ctx.clearRect(0, 0, STAGE_W, STAGE_H);
 
-    // Draw stage backdrop
+    // Stage background
     const stage = Engine.state.stage;
-    if (stage._img) {
+    if (stage && stage._img) {
       ctx.drawImage(stage._img, 0, 0, STAGE_W, STAGE_H);
     } else {
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, STAGE_W, STAGE_H);
     }
 
-    // Draw sprites in layer order
+    // Sprites
     const sprites = Engine.getSortedSprites();
-    for (const sprite of sprites) {
-      if (!sprite.visible) continue;
-      drawSprite(sprite);
+    for (const sp of sprites) {
+      if (!sp.visible) continue;
+      drawSprite(sp);
     }
 
-    // Draw speech bubbles
-    for (const sprite of sprites) {
-      if (sprite._sayText) {
-        drawBubble(sprite);
-      }
+    // Speech bubbles on top
+    for (const sp of sprites) {
+      if (sp._sayText) drawBubble(sp);
     }
   }
 
@@ -113,31 +97,33 @@ const Renderer = (() => {
     const img = sprite._img;
     if (!img && !sprite._emoji) return;
 
-    const sx = sprite.x + STAGE_W / 2;
-    const sy = STAGE_H / 2 - sprite.y;
-    const scale_s = sprite.size / 100;
+    // Convert Scratch coords to canvas pixels
+    // Scratch: origin=centre, +y=up   Canvas: origin=top-left, +y=down
+    const cx = sprite.x + STAGE_W / 2;
+    const cy = STAGE_H / 2 - sprite.y;
+    const s  = sprite.size / 100;
 
     ctx.save();
-    ctx.translate(sx, sy);
+    ctx.translate(cx, cy);
 
-    // Rotation based on rotationMode
     if (sprite.rotationMode === 'all') {
-      ctx.rotate(Utils.scratchDirToRad(sprite.direction));
+      // direction: 0=up → rotate by (dir-90)° to align with canvas
+      ctx.rotate(Utils.degToRad(sprite.direction - 90));
     } else if (sprite.rotationMode === 'leftright') {
-      if (sprite.direction < 0 || (sprite.direction > 180 && sprite.direction <= 360)) {
-        ctx.scale(-1, 1);
-      }
+      // Flip horizontally when direction points left (180°..360° i.e. negative x component)
+      const rad = Utils.degToRad(sprite.direction - 90);
+      if (Math.cos(rad) < 0) ctx.scale(-1, 1);
     }
+    // 'none' — no rotation applied
 
     if (img) {
-      const w = img.width * scale_s;
-      const h = img.height * scale_s;
+      const w = img.naturalWidth  * s;
+      const h = img.naturalHeight * s;
       ctx.drawImage(img, -w / 2, -h / 2, w, h);
     } else {
-      // Emoji fallback
-      const size = 40 * scale_s;
-      ctx.font = `${size}px serif`;
-      ctx.textAlign = 'center';
+      const sz = 40 * s;
+      ctx.font = `${sz}px serif`;
+      ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(sprite._emoji || '❓', 0, 0);
     }
@@ -149,62 +135,60 @@ const Renderer = (() => {
     const text = sprite._sayText;
     if (!text) return;
 
-    const sx = sprite.x + STAGE_W / 2;
-    const sy = STAGE_H / 2 - sprite.y;
+    const cx = sprite.x + STAGE_W / 2;
+    const cy = STAGE_H / 2 - sprite.y;
 
-    const padding = 8;
+    const padding  = 9;
     const maxWidth = 180;
-    ctx.font = '12px Syne, sans-serif';
+    ctx.font = '12px sans-serif';
 
     // Word wrap
     const words = String(text).split(' ');
-    const lines = [];
-    let current = '';
+    const lines  = [];
+    let line = '';
     for (const word of words) {
-      const test = current ? current + ' ' + word : word;
-      if (ctx.measureText(test).width > maxWidth && current) {
-        lines.push(current);
-        current = word;
-      } else {
-        current = test;
-      }
+      const test = line ? line + ' ' + word : word;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else { line = test; }
     }
-    if (current) lines.push(current);
+    if (line) lines.push(line);
 
-    const lineH = 16;
+    const lineH = 17;
     const bw = Math.min(maxWidth, Math.max(...lines.map(l => ctx.measureText(l).width))) + padding * 2;
     const bh = lines.length * lineH + padding * 2;
 
-    // Position above sprite
+    // Position: above and to the right of the sprite centre
     const img = sprite._img;
-    const sH = img ? img.height * (sprite.size / 100) : 40;
-    let bx = sx + 10;
-    let by = sy - sH / 2 - bh - 10;
+    const sH  = img ? (img.naturalHeight * sprite.size / 100) : 40;
+    const sW  = img ? (img.naturalWidth  * sprite.size / 100) : 40;
 
-    // Keep in bounds
-    if (bx + bw > STAGE_W) bx = sx - bw - 10;
-    if (by < 0) by = sy + sH / 2 + 10;
+    let bx = cx + sW / 2 + 4;
+    let by = cy - sH / 2 - bh - 4;
+
+    if (bx + bw > STAGE_W - 2) bx = cx - sW / 2 - bw - 4;
+    if (by < 2) by = cy + sH / 2 + 4;
     bx = Utils.clamp(bx, 2, STAGE_W - bw - 2);
+    by = Utils.clamp(by, 2, STAGE_H - bh - 2);
 
     ctx.save();
-    ctx.fillStyle = 'white';
-    ctx.strokeStyle = '#ccc';
-    ctx.lineWidth = 1;
-    roundRect(ctx, bx, by, bw, bh, 6);
+    ctx.fillStyle   = 'white';
+    ctx.strokeStyle = '#bbb';
+    ctx.lineWidth   = 1.5;
+    _roundRect(ctx, bx, by, bw, bh, 7);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#222';
-    ctx.font = '12px Syne, sans-serif';
-    ctx.textAlign = 'left';
+    ctx.fillStyle    = '#222';
+    ctx.font         = '12px sans-serif';
+    ctx.textAlign    = 'left';
     ctx.textBaseline = 'top';
-    lines.forEach((line, i) => {
-      ctx.fillText(line, bx + padding, by + padding + i * lineH);
-    });
+    lines.forEach((l, i) => ctx.fillText(l, bx + padding, by + padding + i * lineH));
     ctx.restore();
   }
 
-  function roundRect(ctx, x, y, w, h, r) {
+  function _roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
     ctx.lineTo(x + w - r, y);
@@ -218,64 +202,67 @@ const Renderer = (() => {
     ctx.closePath();
   }
 
-  // ── Collision ─────────────────────────────────────────────────
-  function spritesTouching(spriteA, spriteB) {
-    if (!spriteA.visible || !spriteB.visible) return false;
-    // AABB first pass
-    const aImg = spriteA._img;
-    const bImg = spriteB._img;
-    const aw = (aImg ? aImg.width : 40) * (spriteA.size / 100);
-    const ah = (aImg ? aImg.height : 40) * (spriteA.size / 100);
-    const bw = (bImg ? bImg.width : 40) * (spriteB.size / 100);
-    const bh = (bImg ? bImg.height : 40) * (spriteB.size / 100);
+  // ── Collision ──────────────────────────────────────────────────
+  function isPointInSprite(sprite, px, py) {
+    const img = sprite._img;
+    const w   = (img ? img.naturalWidth  : 40) * (sprite.size / 100);
+    const h   = (img ? img.naturalHeight : 40) * (sprite.size / 100);
+    return px >= sprite.x - w / 2 && px <= sprite.x + w / 2 &&
+           py >= sprite.y - h / 2 && py <= sprite.y + h / 2;
+  }
 
-    return !(
-      spriteA.x + aw / 2 < spriteB.x - bw / 2 ||
-      spriteA.x - aw / 2 > spriteB.x + bw / 2 ||
-      spriteA.y + ah / 2 < spriteB.y - bh / 2 ||
-      spriteA.y - ah / 2 > spriteB.y + bh / 2
-    );
+  function spritesTouching(a, b) {
+    if (!a.visible || !b.visible) return false;
+    const aImg = a._img, bImg = b._img;
+    const aw = (aImg ? aImg.naturalWidth  : 40) * (a.size / 100) / 2;
+    const ah = (aImg ? aImg.naturalHeight : 40) * (a.size / 100) / 2;
+    const bw = (bImg ? bImg.naturalWidth  : 40) * (b.size / 100) / 2;
+    const bh = (bImg ? bImg.naturalHeight : 40) * (b.size / 100) / 2;
+    return !(a.x + aw < b.x - bw || a.x - aw > b.x + bw ||
+             a.y + ah < b.y - bh || a.y - ah > b.y + bh);
   }
 
   function spriteOnEdge(sprite) {
     const img = sprite._img;
-    const w = (img ? img.width : 40) * (sprite.size / 100);
-    const h = (img ? img.height : 40) * (sprite.size / 100);
-    return (
-      sprite.x + w / 2 >= STAGE_W / 2 ||
-      sprite.x - w / 2 <= -STAGE_W / 2 ||
-      sprite.y + h / 2 >= STAGE_H / 2 ||
-      sprite.y - h / 2 <= -STAGE_H / 2
-    );
+    const hw = (img ? img.naturalWidth  : 40) * (sprite.size / 100) / 2;
+    const hh = (img ? img.naturalHeight : 40) * (sprite.size / 100) / 2;
+    return sprite.x + hw >  STAGE_W / 2 ||
+           sprite.x - hw < -STAGE_W / 2 ||
+           sprite.y + hh >  STAGE_H / 2 ||
+           sprite.y - hh < -STAGE_H / 2;
   }
 
   function bounceOffEdge(sprite) {
     const img = sprite._img;
-    const w = (img ? img.width : 40) * (sprite.size / 100);
-    const h = (img ? img.height : 40) * (sprite.size / 100);
+    const hw = (img ? img.naturalWidth  : 40) * (sprite.size / 100) / 2;
+    const hh = (img ? img.naturalHeight : 40) * (sprite.size / 100) / 2;
 
-    const rad = Utils.scratchDirToRad(sprite.direction);
-    let dx = Math.cos(rad);
-    let dy = -Math.sin(rad);
+    // direction: 0=up, 90=right → convert to standard math angle for dx/dy
+    const rad = Utils.degToRad(sprite.direction - 90);
+    let dx =  Math.cos(rad); // right component
+    let dy = -Math.sin(rad); // up component (canvas y is inverted)
 
-    if (sprite.x + w / 2 >= STAGE_W / 2 || sprite.x - w / 2 <= -STAGE_W / 2) dx = -dx;
-    if (sprite.y + h / 2 >= STAGE_H / 2 || sprite.y - h / 2 <= -STAGE_H / 2) dy = -dy;
+    if (sprite.x + hw >= STAGE_W / 2 || sprite.x - hw <= -STAGE_W / 2) dx = -dx;
+    if (sprite.y + hh >= STAGE_H / 2 || sprite.y - hh <= -STAGE_H / 2) dy = -dy;
 
-    sprite.direction = Utils.radToDeg(Math.atan2(-dy, dx)) + 90;
-    sprite.direction = ((sprite.direction % 360) + 360) % 360;
+    // Convert back to Scratch direction
+    // math angle: atan2(dy, dx) → scratch dir = math + 90
+    sprite.direction = (Utils.radToDeg(Math.atan2(-dy, dx)) + 90 + 360) % 360;
 
-    // Push back into bounds
-    sprite.x = Utils.clamp(sprite.x, -(STAGE_W / 2 - w / 2), STAGE_W / 2 - w / 2);
-    sprite.y = Utils.clamp(sprite.y, -(STAGE_H / 2 - h / 2), STAGE_H / 2 - h / 2);
+    // Clamp position so sprite is fully inside
+    sprite.x = Utils.clamp(sprite.x, -STAGE_W / 2 + hw, STAGE_W / 2 - hw);
+    sprite.y = Utils.clamp(sprite.y, -STAGE_H / 2 + hh, STAGE_H / 2 - hh);
   }
 
-  // ── Load image ────────────────────────────────────────────────
+  // ── Image loading ──────────────────────────────────────────────
+  const _imgCache = {};
+
   function loadImage(url) {
-    return new Promise((resolve) => {
-      if (!url) { resolve(null); return; }
+    if (_imgCache[url]) return Promise.resolve(_imgCache[url]);
+    return new Promise(resolve => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload = () => resolve(img);
+      img.onload  = () => { _imgCache[url] = img; resolve(img); };
       img.onerror = () => resolve(null);
       img.src = url;
     });
@@ -283,31 +270,24 @@ const Renderer = (() => {
 
   async function loadSpriteImage(sprite) {
     const costume = sprite.costumes[sprite.currentCostume];
-    if (!costume) { sprite._img = null; sprite._emoji = sprite.id === 'stage' ? null : '🐱'; return; }
-    if (costume.url) {
-      const img = await loadImage(costume.url);
-      sprite._img = img;
-      sprite._emoji = img ? null : '❓';
-    } else {
-      sprite._img = null;
-      sprite._emoji = costume.emoji || '🐱';
+    if (!costume || !costume.url) {
+      sprite._img   = null;
+      sprite._emoji = sprite.isStage ? null : '🐱';
+      return;
     }
+    const img = await loadImage(costume.url);
+    sprite._img   = img;
+    sprite._emoji = img ? null : '❓';
   }
 
   return {
-    STAGE_W,
-    STAGE_H,
-    init,
-    resize,
-    render,
-    loadImage,
-    loadSpriteImage,
-    spritesTouching,
-    spriteOnEdge,
-    bounceOffEdge,
-    isPointInSprite,
-    get mouseX() { return mouseX; },
-    get mouseY() { return mouseY; },
-    get mouseDown() { return mouseDown; },
+    STAGE_W, STAGE_H,
+    init, resize, render,
+    loadImage, loadSpriteImage,
+    isPointInSprite, spritesTouching, spriteOnEdge, bounceOffEdge,
+    get mouseX()   { return mouseX; },
+    get mouseY()   { return mouseY; },
+    get mouseDown(){ return mouseDown; },
+    get scale()    { return _scale; },
   };
 })();

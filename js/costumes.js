@@ -1,51 +1,64 @@
 // costumes.js — costume panel and library browser
 
 const CostumePanel = (() => {
-  const SPRITE_URL = 'https://raw.githubusercontent.com/jquinney-hue/pyscratchurls.github.io/refs/heads/main/costumeurls.txt';
-  const BACKDROP_URL = 'https://raw.githubusercontent.com/jquinney-hue/pyscratchurls.github.io/refs/heads/main/backdropurls.txt';
+  const SPRITE_LIB_URL  = 'https://raw.githubusercontent.com/jquinney-hue/pyscratchurls.github.io/refs/heads/main/costumeurls.txt';
+  const STAGE_LIB_URL   = 'https://raw.githubusercontent.com/jquinney-hue/pyscratchurls.github.io/refs/heads/main/backdropurls.txt';
 
-  let cachedSpriteUrls = null;
+  let cachedSpriteUrls   = null;
   let cachedBackdropUrls = null;
+  let _currentSprite     = null; // track which sprite the panel is showing
 
-  // ── Cache on startup ──────────────────────────────────────────
+  // ── Preload library lists on startup ─────────────────────────
   async function preload() {
     try {
       const [s, b] = await Promise.all([
-        Utils.fetchText(SPRITE_URL),
-        Utils.fetchText(BACKDROP_URL),
+        Utils.fetchText(SPRITE_LIB_URL),
+        Utils.fetchText(STAGE_LIB_URL),
       ]);
-      if (s) cachedSpriteUrls = parseUrlList(s);
-      if (b) cachedBackdropUrls = parseUrlList(b);
+      if (s) cachedSpriteUrls   = parseUrlList(s, 'Costume');
+      if (b) cachedBackdropUrls = parseUrlList(b, 'Backdrop');
     } catch (e) {
-      console.warn('Could not preload costume URLs', e);
+      console.warn('Could not preload costume library URLs', e);
     }
   }
 
-  function parseUrlList(text) {
+  function parseUrlList(text, prefix) {
+    // Each line is a partial URL — append /get/ if the URL has no file extension
+    // (Some lines already end in /get/)
     return text.split('\n')
       .map(l => l.trim())
       .filter(l => l && !l.startsWith('#'))
-      .map(url => {
-        const parts = url.split('/');
-        const name = parts[parts.length - 1].replace(/\.\w+$/, '') || url;
-        return { url: Utils.resolveUrl(url), name };
+      .map((rawUrl, i) => {
+        const url = resolveLibUrl(rawUrl);
+        // Derive a readable name from the last path segment before /get/
+        const clean = rawUrl.replace(/\/get\/?$/, '');
+        const seg   = clean.split('/').pop() || '';
+        const name  = seg.replace(/\.\w{2,5}$/, '').replace(/[_-]/g, ' ') || `${prefix} ${i + 1}`;
+        return { url, name };
       });
   }
 
-  // ── Load a sprite into the costume panel ──────────────────────
+  function resolveLibUrl(url) {
+    // The txt file lines are missing /get/ — add it unless already present
+    if (url.endsWith('/get/') || url.endsWith('/get')) return url;
+    return url.endsWith('/') ? url + 'get/' : url + '/get/';
+  }
+
+  // ── Load a sprite/stage into the costume panel ────────────────
   function load(sprite) {
+    _currentSprite = sprite;
     if (!sprite) { renderEmpty(); return; }
-
-    const title = document.getElementById('costume-panel-title');
-    title.textContent = sprite.isStage ? 'Backdrops' : 'Costumes';
-
+    document.getElementById('costume-panel-title').textContent =
+      sprite.isStage ? 'Backdrops' : 'Costumes';
     renderList(sprite);
   }
 
   function renderEmpty() {
-    document.getElementById('costume-list').innerHTML = '<div style="color:var(--text-muted);padding:12px;font-size:12px;">Select a sprite</div>';
+    document.getElementById('costume-list').innerHTML =
+      '<div style="color:var(--text-muted);padding:12px;font-size:12px;">Select a sprite</div>';
   }
 
+  // ── Render the costume list for a sprite ─────────────────────
   function renderList(sprite) {
     const list = document.getElementById('costume-list');
     list.innerHTML = '';
@@ -53,123 +66,186 @@ const CostumePanel = (() => {
     sprite.costumes.forEach((costume, i) => {
       const item = document.createElement('div');
       item.className = 'costume-item' + (i === sprite.currentCostume ? ' active' : '');
+      item.dataset.index = i;
 
-      const img = document.createElement('img');
+      // Thumbnail
+      const thumb = document.createElement('div');
+      thumb.className = 'costume-thumb-img';
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.style.cssText = 'width:36px;height:36px;object-fit:contain;';
       if (costume.url) {
         img.src = costume.url;
-        img.onerror = () => { img.src = ''; img.style.display = 'none'; item.querySelector('.costume-emoji').style.display = 'block'; };
+        img.onerror = () => { img.replaceWith(makeFallbackEmoji()); };
       } else {
-        img.style.display = 'none';
+        thumb.appendChild(makeFallbackEmoji());
       }
+      if (costume.url) thumb.appendChild(img);
 
-      const emoji = document.createElement('span');
-      emoji.className = 'costume-emoji';
-      emoji.textContent = costume.emoji || '🐱';
-      emoji.style.display = costume.url ? 'none' : 'flex';
-      emoji.style.alignItems = 'center';
-      emoji.style.justifyContent = 'center';
-      emoji.style.fontSize = '24px';
-      emoji.style.width = '36px';
-      emoji.style.height = '36px';
+      // Editable name
+      const nameEl = document.createElement('input');
+      nameEl.type = 'text';
+      nameEl.className = 'costume-name-input';
+      nameEl.value = costume.name;
+      nameEl.addEventListener('change', () => {
+        costume.name = nameEl.value.trim() || costume.name;
+      });
+      nameEl.addEventListener('click', e => e.stopPropagation());
 
-      const nameEl = document.createElement('span');
-      nameEl.className = 'costume-name';
-      nameEl.textContent = costume.name;
-
+      // Delete button (bin icon)
       const del = document.createElement('button');
       del.className = 'btn-icon';
-      del.title = 'Remove';
-      del.innerHTML = '×';
-      del.addEventListener('click', (e) => {
+      del.title = 'Delete costume';
+      del.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+      del.addEventListener('click', e => {
         e.stopPropagation();
-        if (sprite.costumes.length <= 1) { alert('Need at least one costume.'); return; }
+        if (sprite.costumes.length <= 1) { alert('A sprite must have at least one costume.'); return; }
         sprite.costumes.splice(i, 1);
-        if (sprite.currentCostume >= sprite.costumes.length) sprite.currentCostume--;
-        Renderer.loadSpriteImage(sprite).then(() => { renderList(sprite); Renderer.render(); });
+        if (sprite.currentCostume >= sprite.costumes.length) sprite.currentCostume = sprite.costumes.length - 1;
+        _afterCostumeChange(sprite);
       });
 
-      item.appendChild(emoji);
-      item.appendChild(img);
+      item.appendChild(thumb);
       item.appendChild(nameEl);
       item.appendChild(del);
 
+      // Click row to select costume
       item.addEventListener('click', () => {
         sprite.currentCostume = i;
-        Renderer.loadSpriteImage(sprite).then(() => { renderList(sprite); Renderer.render(); });
+        _afterCostumeChange(sprite);
       });
 
       list.appendChild(item);
     });
+
+    // ── Add (+) button at the bottom ──────────────────────────
+    const addRow = document.createElement('div');
+    addRow.className = 'costume-add-row';
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'btn btn-sm btn-accent costume-add-btn';
+    addBtn.title = 'Add costume';
+    addBtn.innerHTML = '+ Add Costume';
+    addBtn.addEventListener('click', () => showAddOptions(sprite));
+
+    addRow.appendChild(addBtn);
+    list.appendChild(addRow);
   }
 
-  // ── Add from URL ──────────────────────────────────────────────
-  function initControls() {
-    document.getElementById('btn-add-costume-url').addEventListener('click', addFromUrl);
-    document.getElementById('costume-url-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') addFromUrl();
-    });
-    document.getElementById('btn-browse-costumes').addEventListener('click', openBrowser);
+  function makeFallbackEmoji() {
+    const span = document.createElement('span');
+    span.style.cssText = 'font-size:24px;display:flex;align-items:center;justify-content:center;width:36px;height:36px;';
+    span.textContent = '🐱';
+    return span;
   }
 
-  async function addFromUrl() {
-    const input = document.getElementById('costume-url-input');
-    const url = input.value.trim();
-    if (!url) return;
-
-    const sprite = Engine.getSelectedSprite();
-    if (!sprite) return;
-
-    const parts = url.split('/');
-    const name = parts[parts.length - 1].replace(/\.\w+$/, '') || 'costume';
-    const costume = { name, url: Utils.resolveUrl(url) };
-    sprite.costumes.push(costume);
-    sprite.currentCostume = sprite.costumes.length - 1;
-    input.value = '';
-
+  // ── After any costume mutation: reload image + refresh all UI ─
+  async function _afterCostumeChange(sprite) {
     await Renderer.loadSpriteImage(sprite);
-    renderList(sprite);
-    Renderer.render();
+    renderList(sprite);           // refresh costume panel
+    UI.renderSpritePanel();       // refresh sprite thumb in bottom panel
+    Renderer.render();            // refresh canvas
   }
 
-  // ── Library browser ───────────────────────────────────────────
-  function openBrowser() {
-    const sprite = Engine.getSelectedSprite();
-    if (!sprite) return;
+  // ── Show add options: URL input or library browser ────────────
+  function showAddOptions(sprite) {
+    const isStage = !!sprite.isStage;
+    const prefix  = isStage ? 'Backdrop' : 'Costume';
+    const nextNum = sprite.costumes.length + 1;
 
-    const isStage = sprite.isStage;
-    const urls = isStage ? cachedBackdropUrls : cachedSpriteUrls;
-    const title = isStage ? 'Backdrop Library' : 'Costume Library';
+    const html = `
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px;">Paste image URL</label>
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="add-costume-url" placeholder="https://..." style="flex:1;padding:6px 8px;" />
+            <button class="btn btn-sm btn-accent" id="add-costume-url-btn">Add</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">PNG or SVG. /get/ will be added if needed.</div>
+        </div>
+        <div>
+          <button class="btn btn-sm btn-ghost" id="add-costume-library-btn" style="width:100%;">
+            📁 Browse ${isStage ? 'Backdrop' : 'Costume'} Library
+          </button>
+        </div>
+      </div>`;
+
+    UI.openModal(`Add ${prefix}`, html);
+
+    document.getElementById('add-costume-url-btn').addEventListener('click', async () => {
+      const url = document.getElementById('add-costume-url').value.trim();
+      if (!url) return;
+      const resolved = resolveLibUrl(url);
+      const name = `${prefix} ${nextNum}`;
+      sprite.costumes.push({ name, url: resolved });
+      sprite.currentCostume = sprite.costumes.length - 1;
+      UI.closeModal();
+      await _afterCostumeChange(sprite);
+    });
+
+    document.getElementById('add-costume-url').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('add-costume-url-btn').click();
+    });
+
+    document.getElementById('add-costume-library-btn').addEventListener('click', () => {
+      UI.closeModal();
+      openLibraryBrowser(sprite);
+    });
+  }
+
+  // ── Library browser modal ─────────────────────────────────────
+  function openLibraryBrowser(sprite) {
+    const isStage = !!sprite.isStage;
+    const urls    = isStage ? cachedBackdropUrls : cachedSpriteUrls;
+    const prefix  = isStage ? 'Backdrop' : 'Costume';
+    const title   = `${prefix} Library`;
+    const nextNum = sprite.costumes.length + 1;
 
     if (!urls || urls.length === 0) {
-      UI.openModal(title, '<p style="color:var(--text-dim);font-size:12px;">No library items available. Check your internet connection.</p>');
+      UI.openModal(title, `
+        <p style="color:var(--text-dim);font-size:12px;line-height:1.6;">
+          Library not loaded yet. Check your internet connection and try refreshing.
+        </p>`);
       return;
     }
 
-    let html = `<div class="costume-grid">`;
-    for (const item of urls) {
-      html += `
-        <div class="costume-thumb" data-url="${item.url}" data-name="${item.name}" title="${item.name}">
-          <img src="${item.url}" alt="${item.name}" loading="lazy" />
-          <div class="name">${item.name}</div>
-        </div>
-      `;
-    }
-    html += '</div>';
+    const grid = document.createElement('div');
+    grid.className = 'costume-library-grid';
 
-    UI.openModal(title, html);
+    urls.forEach(item => {
+      const cell = document.createElement('div');
+      cell.className = 'costume-library-cell';
 
-    // Bind clicks
-    document.querySelectorAll('.costume-thumb').forEach(el => {
-      el.addEventListener('click', async () => {
-        const costume = { name: el.dataset.name, url: el.dataset.url };
-        sprite.costumes.push(costume);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = item.url;
+      img.alt = item.name;
+      img.loading = 'lazy';
+
+      const label = document.createElement('div');
+      label.className = 'costume-library-label';
+      label.textContent = item.name;
+
+      cell.appendChild(img);
+      cell.appendChild(label);
+
+      cell.addEventListener('click', async () => {
+        const name = `${prefix} ${nextNum}`;
+        sprite.costumes.push({ name, url: item.url });
         sprite.currentCostume = sprite.costumes.length - 1;
-        await Renderer.loadSpriteImage(sprite);
-        renderList(sprite);
-        Renderer.render();
         UI.closeModal();
+        await _afterCostumeChange(sprite);
       });
+
+      grid.appendChild(cell);
     });
+
+    UI.openModal(title, '');
+    document.getElementById('modal-body').appendChild(grid);
+  }
+
+  function initControls() {
+    // Nothing to wire globally — controls are created dynamically per sprite
   }
 
   return { preload, load, initControls };
