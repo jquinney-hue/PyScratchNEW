@@ -43,6 +43,7 @@ const UI = (() => {
   async function addSprite() {
     const sprite = Engine.addSprite(); // uses DEFAULT_SPRITE_URL via createSprite
     await Renderer.loadSpriteImage(sprite);
+    Renderer.markSortDirty();
     Engine.selectSprite(sprite.id);
     renderSpritePanel();
     Editor.loadSprite(sprite);
@@ -56,6 +57,7 @@ const UI = (() => {
     if (!confirm(`Delete "${sel.name}"?`)) return;
     Scheduler.stopSpriteThreads(sel.id);
     Engine.deleteSprite(sel.id);
+    Renderer.markSortDirty();
     const next = Engine.getSelectedSprite() || Engine.state.stage;
     Engine.selectSprite(next.id);
     renderSpritePanel();

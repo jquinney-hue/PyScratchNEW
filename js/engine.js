@@ -75,7 +75,6 @@ const Engine = (() => {
       ...opts,
     });
     state.sprites.push(sprite);
-    if (typeof Renderer !== 'undefined' && Renderer.markSortDirty) Renderer.markSortDirty();
     return sprite;
   }
 
@@ -84,7 +83,6 @@ const Engine = (() => {
     if (state.selectedSpriteId === id) {
       state.selectedSpriteId = state.sprites.length > 0 ? state.sprites[0].id : 'stage';
     }
-    if (typeof Renderer !== 'undefined' && Renderer.markSortDirty) Renderer.markSortDirty();
   }
 
   function moveToFront(id) {
