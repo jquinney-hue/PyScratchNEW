@@ -297,7 +297,7 @@ const Renderer = (() => {
 
   return {
     STAGE_W, STAGE_H,
-    init, resize, render,
+    init, resize, render, markSortDirty,
     loadImage, loadSpriteImage,
     isPointInSprite, spritesTouching, spriteOnEdge, bounceOffEdge,
     get mouseX()   { return mouseX; },
