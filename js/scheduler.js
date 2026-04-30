@@ -21,6 +21,40 @@ const Scheduler = (() => {
   let startTime     = performance.now();
   let _runId        = 0;
 
+  // ── Performance log ───────────────────────────────────────────
+  const PERF_HISTORY = 120; // keep last 120 frames (~2s at 60fps)
+  const _perf = {
+    frameTimes:  [],   // ms per frame (wall time between rAF calls)
+    tickTimes:   [],   // ms spent ticking all threads each frame
+    renderTimes: [],   // ms spent in Renderer.render()
+    threadLog:   {},   // spriteId:threadId -> { ticks, totalMs, lastMs }
+    lastFrameAt: 0,
+    frameCount:  0,
+  };
+
+  function _perfRecord(frameDt, tickMs, renderMs) {
+    const arr = _perf.frameTimes;
+    arr.push(frameDt); if (arr.length > PERF_HISTORY) arr.shift();
+    const arr2 = _perf.tickTimes;
+    arr2.push(tickMs); if (arr2.length > PERF_HISTORY) arr2.shift();
+    const arr3 = _perf.renderTimes;
+    arr3.push(renderMs); if (arr3.length > PERF_HISTORY) arr3.shift();
+    _perf.frameCount++;
+    // Only push to panel every frame — panel itself skips render when hidden
+    PerfPanel.update(_perf);
+  }
+
+  function _perfThreadTick(ts, ms) {
+    const key = ts.spriteId + ':' + ts.threadId;
+    if (!_perf.threadLog[key]) {
+      _perf.threadLog[key] = { name: ts.name, spriteId: ts.spriteId, ticks: 0, totalMs: 0, lastMs: 0 };
+    }
+    const e = _perf.threadLog[key];
+    e.ticks++;
+    e.totalMs += ms;
+    e.lastMs   = ms;
+  }
+
   // ── Start / Stop ──────────────────────────────────────────────
   function startAll() {
     if (Engine.state.running) return;
@@ -165,31 +199,45 @@ const Scheduler = (() => {
   }
 
   // ── Skulpt execution ──────────────────────────────────────────
+  // ISOLATION STRATEGY:
+  // Skulpt's builtins dict is global, but importMainWithBody is
+  // synchronous up to its first suspension. We exploit this:
+  //   1. Write this thread's API into Sk.builtins immediately before launch.
+  //   2. The thread runs synchronously until it hits its first wait(0) /
+  //      Sk.yield suspension and parks itself in ts._suspension.
+  //   3. From that point on, the thread is resumed by _tick() one frame
+  //      at a time — but by then ALL threads have already launched and
+  //      each has its own closure captured in ts._api.
+  //   4. On each resume we re-apply this thread's API to Sk.builtins for
+  //      the duration of that tick, then the next thread does the same.
+  //
+  // Because Skulpt is single-threaded JS under the hood, only one thread
+  // actually executes Python at any instant — so setting builtins before
+  // each resume is safe and correct.
   function _runSkulptThread(code, spriteId, threadId, ts) {
-    Sk.configure({
-      output:     txt => console.log(`[${spriteId}]`, txt),
-      read:       x => {
-        if (Sk.builtinFiles && Sk.builtinFiles.files[x] !== undefined)
-          return Sk.builtinFiles.files[x];
-        throw `File not found: '${x}'`;
-      },
-      yieldLimit:  500,   // suspend every N bytecode ops even without wait()
-      execLimit:   null,
-      __future__:  Sk.python3,
-    });
+    const { api, flatEntries } = PythonAPI.buildModule(spriteId, threadId);
+    ts._flatEntries = flatEntries; // pre-built [k,v,k,v...] for fast apply
 
-    const api = PythonAPI.buildModule(spriteId, threadId);
-    for (const [k, v] of Object.entries(api)) Sk.builtins[k] = v;
+    // Apply this thread's API to builtins for the initial synchronous run
+    _applyAPI(flatEntries);
 
     let susp;
     try {
-      susp = Sk.importMainWithBody('<thread>', false, code, true);
+      susp = Sk.importMainWithBody('<thread_' + ts.id + '>', false, code, true);
     } catch(e) {
       _threadError(ts, e);
       return;
     }
 
     _drive(susp, ts);
+  }
+
+  // Write a thread's API into Sk.builtins using pre-built flat array
+  // [k0, v0, k1, v1, ...] — avoids Object.entries() allocation per frame
+  function _applyAPI(flatEntries) {
+    for (let i = 0; i < flatEntries.length; i += 2) {
+      Sk.builtins[flatEntries[i]] = flatEntries[i + 1];
+    }
   }
 
   // ── Drive the suspension chain ────────────────────────────────
@@ -216,6 +264,8 @@ const Scheduler = (() => {
       if (type === 'Sk.promise') {
         susp.data.promise.then(value => {
           if (ts.dead) return;
+          // Re-apply this thread's API before resuming from a promise
+          if (ts._flatEntries) _applyAPI(ts._flatEntries);
           let next;
           try { next = susp.resume(value); }
           catch(e) { _threadError(ts, e); return; }
@@ -246,6 +296,11 @@ const Scheduler = (() => {
 
     ts._suspension = null;
 
+    // Re-apply THIS thread's API to Sk.builtins before resuming.
+    // Only one thread executes at a time (JS is single-threaded), so
+    // this is safe — builtins point at the right sprite for this tick.
+    if (ts._flatEntries) _applyAPI(ts._flatEntries);
+
     let next;
     try { next = susp.resume(); }
     catch(e) { _threadError(ts, e); return; }
@@ -260,12 +315,28 @@ const Scheduler = (() => {
       if (_runId !== runId || !Engine.state.running) return;
       animFrameId = requestAnimationFrame(frame);
 
-      // Tick every parked thread
-      const snapshot = activeThreads.slice();
-      for (const t of snapshot) _tick(t, now);
+      const frameDt = _perf.lastFrameAt ? now - _perf.lastFrameAt : 0;
+      _perf.lastFrameAt = now;
 
+      // Tick every parked thread
+      // Use activeThreads directly (no .slice()) — threads only removed via
+      // _threadDone/_threadError which filter the array; new threads appended
+      // at end are fine to run this frame too.
+      const tickStart = performance.now();
+      for (let i = 0; i < activeThreads.length; i++) {
+        const t  = activeThreads[i];
+        const t0 = performance.now();
+        _tick(t, now);
+        _perfThreadTick(t, performance.now() - t0);
+      }
+      const tickMs = performance.now() - tickStart;
+
+      const renderStart = performance.now();
       Renderer.render();
+      const renderMs = performance.now() - renderStart;
+
       UI.updateVariableDisplay();
+      _perfRecord(frameDt, tickMs, renderMs);
     }
 
     animFrameId = requestAnimationFrame(frame);
@@ -322,5 +393,6 @@ const Scheduler = (() => {
     get startTime()    { return startTime; },
     set startTime(v)   { startTime = v; },
     get activeThreads(){ return activeThreads; },
+    get perf()         { return _perf; },
   };
 })();

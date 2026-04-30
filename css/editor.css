@@ -297,94 +297,127 @@
 }
 
 
-/* ── INTELLISENSE POPUP ─────────────────────────────────────────── */
-/* Fixed to body so it is never clipped by overflow:hidden parents  */
+
+/* ── INTELLISENSE: AUTOCOMPLETE POPUP ─────────────────────────── */
 #ac-popup {
   position: fixed;
   z-index: 9999;
   background: var(--bg-panel);
   border: 1px solid var(--border-mid);
   border-radius: var(--radius);
-  box-shadow: 0 6px 24px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);
-  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.16);
+  overflow-y: auto;
+  max-height: 320px;
+  display: none;
   font-family: var(--font-ui);
   font-size: 12px;
-  display: none;
-  max-height: 320px;
-  overflow-y: auto;
 }
 
 .ac-row {
-  display: grid;
-  grid-template-columns: 18px 140px 1fr;
-  grid-template-rows: auto auto;
+  display: flex;
   align-items: center;
-  gap: 0 8px;
+  gap: 6px;
   padding: 5px 10px;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
+  min-height: 28px;
+  overflow: hidden;
   transition: background 0.07s;
-  min-height: 30px;
 }
 .ac-row:last-child { border-bottom: none; }
-.ac-row:hover { background: var(--bg-panel2); }
+.ac-row:hover      { background: var(--bg-panel2); }
 .ac-row.ac-sel {
   background: var(--accent-bg);
   border-left: 3px solid var(--scratch-purple);
   padding-left: 7px;
 }
 
-/* Kind icon column */
-.ac-kind {
-  font-size: 11px;
-  font-weight: bold;
-  text-align: center;
-  grid-row: 1;
-}
+.ac-kind      { font-size:11px; font-weight:bold; width:14px; flex-shrink:0; text-align:center; }
 .ac-kind-fn   { color: var(--scratch-purple); }
-.ac-kind-kw   { color: hsl(30, 80%, 50%); }
-.ac-kind-snip { color: hsl(160, 60%, 40%); }
+.ac-kind-kw   { color: hsl(30,80%,50%); }
+.ac-kind-snip { color: hsl(160,60%,40%); }
 
-/* Name column */
 .ac-name {
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: bold;
   color: var(--text);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  grid-row: 1;
+  flex-shrink: 0;
 }
 .ac-row.ac-sel .ac-name { color: var(--scratch-purple); }
 
-/* Params — shown beside name */
 .ac-params {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-/* Signature preview (right side) */
-.ac-sig {
+.ac-doc {
   font-size: 11px;
   color: var(--text-muted);
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  grid-row: 1;
+  white-space: nowrap;
+  flex: 1;
+  text-align: right;
+  padding-left: 8px;
+}
+/* Only show doc on selected row */
+.ac-doc { display: none; }
+.ac-row.ac-sel .ac-doc { display: block; }
+
+/* ── INTELLISENSE: SIGNATURE HELP ─────────────────────────────── */
+#sig-help {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius);
+  box-shadow: 0 3px 12px rgba(0,0,0,0.14);
+  padding: 5px 10px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  max-width: 440px;
+  pointer-events: none;
 }
 
-/* Doc string below — spans all columns */
-.ac-doc {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  font-size: 10px;
-  color: var(--text-muted);
+.sh-sig {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-top: 1px;
-  display: none; /* show only on selected row to keep list compact */
 }
-.ac-row.ac-sel .ac-doc { display: block; color: var(--text-dim); }
+
+.sh-active-param {
+  color: var(--scratch-purple);
+  text-decoration: underline;
+  font-weight: bold;
+}
+
+.sh-doc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sh-nav {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: 8px;
+  pointer-events: all;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.sh-arr {
+  cursor: pointer;
+  color: var(--scratch-purple);
+  font-size: 10px;
+}

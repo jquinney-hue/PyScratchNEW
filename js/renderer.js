@@ -12,7 +12,7 @@ const Renderer = (() => {
   // ── Init ──────────────────────────────────────────────────────
   function init(canvasEl) {
     canvas = canvasEl;
-    ctx    = canvas.getContext('2d', { willReadFrequently: true });
+    ctx    = canvas.getContext('2d'); // no willReadFrequently — keeps GPU acceleration
     resize();
     window.addEventListener('resize', () => { resize(); render(); });
 
@@ -66,12 +66,24 @@ const Renderer = (() => {
     Scheduler.fireEvent('stage_click', 'stage');
   }
 
+  // Cached sorted sprite list — rebuilt only when sprite count or layers change
+  let _sortedCache = [];
+  let _sortedDirty = true;
+  function markSortDirty() { _sortedDirty = true; }
+
+  function _getSorted() {
+    if (_sortedDirty) {
+      _sortedCache = Engine.getSortedSprites();
+      _sortedDirty = false;
+    }
+    return _sortedCache;
+  }
+
   // ── Main render ────────────────────────────────────────────────
   function render() {
     if (!ctx) return;
     ctx.clearRect(0, 0, STAGE_W, STAGE_H);
 
-    // Stage background
     const stage = Engine.state.stage;
     if (stage && stage._img) {
       ctx.drawImage(stage._img, 0, 0, STAGE_W, STAGE_H);
@@ -80,16 +92,19 @@ const Renderer = (() => {
       ctx.fillRect(0, 0, STAGE_W, STAGE_H);
     }
 
-    // Sprites
-    const sprites = Engine.getSortedSprites();
-    for (const sp of sprites) {
+    const sprites = _getSorted();
+    let hasBubbles = false;
+    for (let i = 0; i < sprites.length; i++) {
+      const sp = sprites[i];
       if (!sp.visible) continue;
       drawSprite(sp);
+      if (sp._sayText) hasBubbles = true;
     }
 
-    // Speech bubbles on top
-    for (const sp of sprites) {
-      if (sp._sayText) drawBubble(sp);
+    if (hasBubbles) {
+      for (let i = 0; i < sprites.length; i++) {
+        if (sprites[i]._sayText) drawBubble(sprites[i]);
+      }
     }
   }
 
@@ -97,39 +112,50 @@ const Renderer = (() => {
     const img = sprite._img;
     if (!img && !sprite._emoji) return;
 
-    // Convert Scratch coords to canvas pixels
-    // Scratch: origin=centre, +y=up   Canvas: origin=top-left, +y=down
     const cx = sprite.x + STAGE_W / 2;
     const cy = STAGE_H / 2 - sprite.y;
     const s  = sprite.size / 100;
-
-    ctx.save();
-    ctx.translate(cx, cy);
-
-    if (sprite.rotationMode === 'all') {
-      // direction: 0=up → rotate by (dir-90)° to align with canvas
-      ctx.rotate(Utils.degToRad(sprite.direction - 90));
-    } else if (sprite.rotationMode === 'leftright') {
-      // Flip horizontally when direction points left (180°..360° i.e. negative x component)
-      const rad = Utils.degToRad(sprite.direction - 90);
-      if (Math.cos(rad) < 0) ctx.scale(-1, 1);
-    }
-    // 'none' — no rotation applied
+    const rm = sprite.rotationMode;
 
     if (img) {
       const w = img.naturalWidth  * s;
       const h = img.naturalHeight * s;
-      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+
+      if (rm === 'none') {
+        // Fast path: no transform needed — single drawImage call, no save/restore
+        ctx.drawImage(img, cx - w * 0.5, cy - h * 0.5, w, h);
+      } else if (rm === 'leftright') {
+        // Only flip, no rotate — cheap transform
+        const rad = (sprite.direction - 90) * 0.017453292519943295;
+        if (Math.cos(rad) < 0) {
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.scale(-1, 1);
+          ctx.drawImage(img, -w * 0.5, -h * 0.5, w, h);
+          ctx.restore();
+        } else {
+          ctx.drawImage(img, cx - w * 0.5, cy - h * 0.5, w, h);
+        }
+      } else {
+        // Full rotation
+        const rad = (sprite.direction - 90) * 0.017453292519943295;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rad);
+        ctx.drawImage(img, -w * 0.5, -h * 0.5, w, h);
+        ctx.restore();
+      }
     } else {
       const sz = 40 * s;
-      ctx.font = `${sz}px serif`;
+      ctx.font = sz + 'px serif';
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(sprite._emoji || '❓', 0, 0);
+      ctx.fillText(sprite._emoji || '❓', cx, cy);
     }
-
-    ctx.restore();
   }
+
+  // Bubble layout cache — recompute only when text changes
+  const _bubbleCache = new Map(); // spriteId -> { text, lines, bw, bh }
 
   function drawBubble(sprite) {
     const text = sprite._sayText;
@@ -138,41 +164,39 @@ const Renderer = (() => {
     const cx = sprite.x + STAGE_W / 2;
     const cy = STAGE_H / 2 - sprite.y;
 
-    const padding  = 9;
-    const maxWidth = 180;
-    ctx.font = '12px sans-serif';
+    const PADDING = 9, MAX_W = 180, LINE_H = 17;
 
-    // Word wrap
-    const words = String(text).split(' ');
-    const lines  = [];
-    let line = '';
-    for (const word of words) {
-      const test = line ? line + ' ' + word : word;
-      if (ctx.measureText(test).width > maxWidth && line) {
-        lines.push(line);
-        line = word;
-      } else { line = test; }
+    // Recompute layout only when text changes
+    let layout = _bubbleCache.get(sprite.id);
+    if (!layout || layout.text !== text) {
+      ctx.font = '12px sans-serif';
+      const words = String(text).split(' ');
+      const lines = [];
+      let line = '';
+      for (const word of words) {
+        const test = line ? line + ' ' + word : word;
+        if (ctx.measureText(test).width > MAX_W && line) { lines.push(line); line = word; }
+        else line = test;
+      }
+      if (line) lines.push(line);
+      const bw = Math.min(MAX_W, Math.max(...lines.map(l => ctx.measureText(l).width))) + PADDING * 2;
+      const bh = lines.length * LINE_H + PADDING * 2;
+      layout = { text, lines, bw, bh };
+      _bubbleCache.set(sprite.id, layout);
     }
-    if (line) lines.push(line);
 
-    const lineH = 17;
-    const bw = Math.min(maxWidth, Math.max(...lines.map(l => ctx.measureText(l).width))) + padding * 2;
-    const bh = lines.length * lineH + padding * 2;
-
-    // Position: above and to the right of the sprite centre
+    const { lines, bw, bh } = layout;
     const img = sprite._img;
     const sH  = img ? (img.naturalHeight * sprite.size / 100) : 40;
     const sW  = img ? (img.naturalWidth  * sprite.size / 100) : 40;
 
-    let bx = cx + sW / 2 + 4;
-    let by = cy - sH / 2 - bh - 4;
-
-    if (bx + bw > STAGE_W - 2) bx = cx - sW / 2 - bw - 4;
-    if (by < 2) by = cy + sH / 2 + 4;
+    let bx = cx + sW * 0.5 + 4;
+    let by = cy - sH * 0.5 - bh - 4;
+    if (bx + bw > STAGE_W - 2) bx = cx - sW * 0.5 - bw - 4;
+    if (by < 2) by = cy + sH * 0.5 + 4;
     bx = Utils.clamp(bx, 2, STAGE_W - bw - 2);
     by = Utils.clamp(by, 2, STAGE_H - bh - 2);
 
-    ctx.save();
     ctx.fillStyle   = 'white';
     ctx.strokeStyle = '#bbb';
     ctx.lineWidth   = 1.5;
@@ -184,8 +208,9 @@ const Renderer = (() => {
     ctx.font         = '12px sans-serif';
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'top';
-    lines.forEach((l, i) => ctx.fillText(l, bx + padding, by + padding + i * lineH));
-    ctx.restore();
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], bx + PADDING, by + PADDING + i * LINE_H);
+    }
   }
 
   function _roundRect(ctx, x, y, w, h, r) {
@@ -202,34 +227,18 @@ const Renderer = (() => {
     ctx.closePath();
   }
 
-  // ── Collision ──────────────────────────────────────────────────
+  // ── Collision — delegated to Collision module ─────────────────
+  // Collision.js implements AABB tree + pixel-mask narrow phase.
   function isPointInSprite(sprite, px, py) {
-    const img = sprite._img;
-    const w   = (img ? img.naturalWidth  : 40) * (sprite.size / 100);
-    const h   = (img ? img.naturalHeight : 40) * (sprite.size / 100);
-    return px >= sprite.x - w / 2 && px <= sprite.x + w / 2 &&
-           py >= sprite.y - h / 2 && py <= sprite.y + h / 2;
+    return Collision.isPointInSprite(sprite, px, py);
   }
 
   function spritesTouching(a, b) {
-    if (!a.visible || !b.visible) return false;
-    const aImg = a._img, bImg = b._img;
-    const aw = (aImg ? aImg.naturalWidth  : 40) * (a.size / 100) / 2;
-    const ah = (aImg ? aImg.naturalHeight : 40) * (a.size / 100) / 2;
-    const bw = (bImg ? bImg.naturalWidth  : 40) * (b.size / 100) / 2;
-    const bh = (bImg ? bImg.naturalHeight : 40) * (b.size / 100) / 2;
-    return !(a.x + aw < b.x - bw || a.x - aw > b.x + bw ||
-             a.y + ah < b.y - bh || a.y - ah > b.y + bh);
+    return Collision.spritesTouching(a, b);
   }
 
   function spriteOnEdge(sprite) {
-    const img = sprite._img;
-    const hw = (img ? img.naturalWidth  : 40) * (sprite.size / 100) / 2;
-    const hh = (img ? img.naturalHeight : 40) * (sprite.size / 100) / 2;
-    return sprite.x + hw >  STAGE_W / 2 ||
-           sprite.x - hw < -STAGE_W / 2 ||
-           sprite.y + hh >  STAGE_H / 2 ||
-           sprite.y - hh < -STAGE_H / 2;
+    return Collision.spriteOnEdge(sprite, STAGE_W, STAGE_H);
   }
 
   function bounceOffEdge(sprite) {
@@ -270,6 +279,8 @@ const Renderer = (() => {
 
   async function loadSpriteImage(sprite) {
     const costume = sprite.costumes[sprite.currentCostume];
+    // Invalidate old collision shape before replacing image
+    if (sprite._img) Collision.invalidate(sprite._img);
     if (!costume || !costume.url) {
       sprite._img   = null;
       sprite._emoji = sprite.isStage ? null : '🐱';
@@ -278,6 +289,10 @@ const Renderer = (() => {
     const img = await loadImage(costume.url);
     sprite._img   = img;
     sprite._emoji = img ? null : '❓';
+    // Pre-warm the collision shape cache in the background
+    if (img) requestIdleCallback
+      ? requestIdleCallback(() => Collision.isPointInSprite(sprite, -9999, -9999))
+      : setTimeout(() => Collision.isPointInSprite(sprite, -9999, -9999), 100);
   }
 
   return {

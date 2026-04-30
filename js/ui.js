@@ -47,6 +47,7 @@ const UI = (() => {
     renderSpritePanel();
     Editor.loadSprite(sprite);
     CostumePanel.load(sprite);
+    Renderer.render(); // immediately show new sprite on canvas
   }
 
   function deleteSprite() {

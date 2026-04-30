@@ -3,6 +3,7 @@
 window.addEventListener('DOMContentLoaded', async () => {
   // ── Init engine & renderer ────────────────────────────────────
   Engine.init();
+  PythonAPI.configure(); // one-time Skulpt config — must be before any thread launch
   Renderer.init(document.getElementById('stage-canvas'));
 
   // ── Load initial images ───────────────────────────────────────
@@ -50,6 +51,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('btn-publish').addEventListener('click', () => Publisher.publish());
   document.getElementById('btn-help').addEventListener('click', showHelp);
+  document.getElementById('btn-perf').addEventListener('click', () => PerfPanel.toggle());
 
   // ── Shortcuts ─────────────────────────────────────────────────
   document.addEventListener('keydown', e => {
