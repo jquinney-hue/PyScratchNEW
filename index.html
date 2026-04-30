@@ -1,488 +1,215 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PyScratch</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Skulpt: Real Python runtime (REQUIRED — replaces the old transpiler) -->
-    <script src="https://skulpt.org/js/skulpt.min.js"></script>
-    <script src="https://skulpt.org/js/skulpt-stdlib.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500;700&display=swap');
-
-        body { font-family: 'Roboto', sans-serif; overflow: hidden; background-color: #e5e7eb; }
-        .code-editor { font-family: 'Roboto Mono', monospace; tab-size: 4; }
-
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
-        ::-webkit-scrollbar-thumb { background: #888; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #555; }
-
-        .canvas-container {
-            background-image: linear-gradient(45deg, #ccc 25%, transparent 25%),
-                              linear-gradient(-45deg, #ccc 25%, transparent 25%),
-                              linear-gradient(45deg, transparent 75%, #ccc 75%),
-                              linear-gradient(-45deg, transparent 75%, #ccc 75%);
-            background-size: 20px 20px;
-            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-        }
-
-        /* Variable Display */
-        #variable-overlay { pointer-events: none; }
-        .var-box { pointer-events: auto; background: rgba(255, 140, 0, 0.9); color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; margin-bottom: 4px; border: 1px solid rgba(0,0,0,0.2); box-shadow: 2px 2px 0px rgba(0,0,0,0.1); }
-        .var-name { margin-right: 5px; opacity: 0.9; }
-        .var-value { background: rgba(0,0,0,0.2); padding: 0 4px; border-radius: 2px; }
-
-        /* Autocomplete */
-        #autocomplete-list {
-            display: none;
-            position: fixed;
-            background: white;
-            border: 1px solid #cbd5e1;
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
-            border-radius: 0.375rem;
-            z-index: 1000;
-            max-height: 200px;
-            overflow-y: auto;
-            min-width: 280px;
-            font-family: 'Roboto Mono', monospace;
-            font-size: 12px;
-        }
-        /* script.js builds items with class "sug-item" and "sug-badge" */
-        .sug-item { padding: 4px 8px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f1f5f9; }
-        .sug-item:hover, .sug-item.active { background-color: #e0e7ff; }
-        .sug-sig { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .sug-badge { font-size: 9px; padding: 1px 4px; border-radius: 2px; color: white; font-weight: bold; width: 35px; text-align: center; margin-left: 8px; flex-shrink: 0; }
-        .badge-mov  { background-color: #3b82f6; }
-        .badge-look { background-color: #a855f7; }
-        .badge-evt  { background-color: #eab308; }
-        .badge-ctrl { background-color: #f59e0b; }
-        .badge-sens { background-color: #06b6d4; }
-        .badge-var  { background-color: #f97316; }
-        .badge-rand { background-color: #22c55e; }
-
-        /* Sprite tabs above the editor (script.js uses id="sprite-tabs") */
-        #sprite-tabs { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #f3f4f6; border-bottom: 1px solid #d1d5db; overflow-x: auto; flex-shrink: 0; }
-        .sprite-tab { padding: 3px 10px; border-radius: 4px; border: 1px solid #d1d5db; font-size: 11px; cursor: pointer; white-space: nowrap; background: white; color: #374151; }
-        .sprite-tab.active { background: #4f46e5; border-color: #4f46e5; color: white; }
-        .sprite-tab:hover:not(.active) { border-color: #6366f1; color: #6366f1; }
-        .sprite-tab.add-tab { border-style: dashed; color: #9ca3af; background: transparent; }
-        .sprite-tab.add-tab:hover { border-color: #22c55e; color: #22c55e; }
-
-        /* Console panel */
-        #console-panel { height: 110px; flex-shrink: 0; display: flex; flex-direction: column; border-top: 1px solid #d1d5db; }
-        #console-header { padding: 3px 8px; background: #1f2937; font-size: 11px; color: #9ca3af; display: flex; align-items: center; gap: 6px; font-family: 'Roboto Mono', monospace; }
-        #console-output { flex: 1; overflow-y: auto; padding: 4px 8px; font-size: 11px; line-height: 1.6; background: #111827; font-family: 'Roboto Mono', monospace; }
-        .con-line { white-space: pre-wrap; color: #d1d5db; }
-        .con-line.err  { color: #f87171; }
-        .con-line.ok   { color: #4ade80; }
-        .con-line.info { color: #93c5fd; }
-        .con-line.warn { color: #fbbf24; }
-
-        /* Sprite list cards (script.js uses class "spr-card", "spr-add", "spr-name", "spr-del") */
-        .spr-card { border: 2px solid #e5e7eb; border-radius: 8px; padding: 6px; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; background: white; transition: border-color .15s; position: relative; flex-shrink: 0; width: 72px; }
-        .spr-card:hover { border-color: #6366f1; }
-        .spr-card.selected { border-color: #4f46e5; background: #eef2ff; }
-        .spr-card img { width: 40px; height: 40px; object-fit: contain; }
-        .spr-name { font-size: 10px; color: #6b7280; text-align: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; width: 100%; }
-        .spr-del { position: absolute; top: 2px; right: 2px; display: none; background: #ef4444; color: white; border: none; border-radius: 3px; width: 14px; height: 14px; font-size: 9px; cursor: pointer; align-items: center; justify-content: center; padding: 0; }
-        .spr-card:hover .spr-del { display: flex; }
-        .spr-add { border-style: dashed; color: #9ca3af; justify-content: center; min-height: 68px; }
-        .spr-add:hover { border-color: #22c55e; color: #22c55e; }
-
-        /* Costume list (script.js uses id="costumes-section", class "cos-card", "cos-name", "cos-del") */
-        #costumes-section { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-        .cos-card { display: flex; align-items: center; gap: 8px; border: 1px solid #e5e7eb; border-radius: 6px; padding: 5px 7px; background: white; cursor: pointer; }
-        .cos-card.selected { border-color: #4f46e5; background: #eef2ff; }
-        .cos-card img { width: 36px; height: 36px; object-fit: contain; }
-        .cos-name { font-size: 11px; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-        .cos-del { color: #ef4444; font-size: 11px; cursor: pointer; padding: 4px; display: none; }
-        .cos-card:hover .cos-del { display: block; }
-
-        /* Library grid items (script.js uses class "lib-item") */
-        .lib-item { border: 2px solid #e5e7eb; border-radius: 6px; padding: 4px; cursor: pointer; background: white; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; transition: border-color .15s; }
-        .lib-item:hover { border-color: #4f46e5; background: #eef2ff; }
-        .lib-item img { width: 100%; height: 100%; object-fit: contain; }
-
-        /* Angle Picker */
-        .angle-circle { cursor: pointer; position: relative; }
-        .angle-line { pointer-events: none; transition: transform 0.1s; }
-
-        /* hidden utility */
-        .hidden { display: none !important; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PyScratch</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/main.css" />
+  <link rel="stylesheet" href="css/editor.css" />
+  <link rel="stylesheet" href="css/panels.css" />
 </head>
-<body class="flex flex-col h-screen select-none">
+<body>
+  <div id="app">
+    <!-- Top Bar -->
+    <header id="topbar">
+      <div class="logo">
+        <span class="logo-icon">🐍</span>
+        <span class="logo-text">PyScratch</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost" id="btn-save" title="Save project">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save
+        </button>
+        <button class="btn btn-ghost" id="btn-load" title="Load project">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          Load
+        </button>
+        <button class="btn btn-ghost" id="btn-publish" title="Publish as HTML">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Publish
+        </button>
+        <button class="btn btn-ghost" id="btn-help" title="Help">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Help
+        </button>
+      </div>
+      <div class="topbar-controls">
+        <button class="btn btn-green" id="btn-start" title="Start (Green Flag)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </button>
+        <button class="btn btn-red" id="btn-stop" title="Stop">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        </button>
+      </div>
+    </header>
 
-    <!-- ═══════════ TOP BAR ═══════════ -->
-    <div class="h-12 bg-indigo-600 text-white flex items-center px-4 justify-between shadow-md z-20">
-        <div class="flex items-center space-x-4">
-            <span class="font-bold text-xl tracking-tight">
-                <i class="fa-brands fa-python mr-2"></i>PyScratch 2.0
-            </span>
-            <div class="h-6 w-px bg-indigo-400"></div>
-            <button onclick="saveProject()" class="hover:bg-indigo-500 px-2 py-1 rounded transition">
-                <i class="fa-solid fa-save mr-1"></i> Save
+    <!-- Main Layout -->
+    <div id="main-layout">
+      <!-- Left Panel -->
+      <div id="left-panel">
+        <div class="panel-tabs">
+          <button class="tab-btn active" data-tab="code">Code</button>
+          <button class="tab-btn" data-tab="costumes">Costumes</button>
+        </div>
+
+        <!-- Code Tab -->
+        <div id="tab-code" class="tab-content active">
+          <div id="thread-panel">
+            <div class="thread-panel-header">
+              <span>Threads</span>
+              <button class="btn-icon" id="btn-add-thread" title="Add thread">+</button>
+            </div>
+            <div id="thread-list"></div>
+          </div>
+          <div id="editor-panel">
+            <div id="editor-toolbar">
+              <span id="current-thread-label">Thread: main</span>
+            </div>
+            <div id="code-editor-wrapper">
+              <textarea id="code-editor" spellcheck="false" placeholder="# Write Python code here
+# Example:
+def game_start():
+    while True:
+        move_steps(3)
+        if on_edge():
+            bounce()
+        wait(0.016)
+"></textarea>
+              <div id="line-numbers"></div>
+            </div>
+            <div id="error-overlay" class="hidden"></div>
+          </div>
+        </div>
+
+        <!-- Costumes Tab -->
+        <div id="tab-costumes" class="tab-content">
+          <div id="costume-panel">
+            <div class="costume-section-header">
+              <span id="costume-panel-title">Costumes</span>
+            </div>
+            <div id="costume-list"></div>
+            <div class="costume-add-section">
+              <div class="input-row">
+                <input type="text" id="costume-url-input" placeholder="Paste image URL..." />
+                <button class="btn btn-sm btn-accent" id="btn-add-costume-url">Add</button>
+              </div>
+              <button class="btn btn-sm btn-ghost" id="btn-browse-costumes">Browse Library</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Panel -->
+      <div id="right-panel">
+        <!-- Stage Area -->
+        <div id="stage-area">
+          <div id="stage-container">
+            <canvas id="stage-canvas"></canvas>
+            <div id="stage-overlay">
+              <div id="variable-display"></div>
+              <div id="ask-overlay" class="hidden">
+                <div id="ask-bubble">
+                  <span id="ask-message"></span>
+                  <div class="ask-input-row">
+                    <input type="text" id="ask-input" />
+                    <button id="ask-submit">✓</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="stage-controls">
+            <span id="mouse-coords">x: 0, y: 0</span>
+            <button class="btn-icon" id="btn-fullscreen" title="Fullscreen">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
             </button>
-            <label class="hover:bg-indigo-500 px-2 py-1 rounded transition cursor-pointer">
-                <i class="fa-solid fa-folder-open mr-1"></i> Load
-                <input type="file" class="hidden" accept=".ps2" onchange="loadProject(this)">
-            </label>
-            <button onclick="publishProject()" class="hover:bg-indigo-500 px-2 py-1 rounded transition">
-                <i class="fa-solid fa-share-from-square mr-1"></i> Publish
-            </button>
-            <button onclick="showHelp()" class="hover:bg-indigo-500 px-2 py-1 rounded transition">
-                <i class="fa-solid fa-circle-question mr-1"></i> Help
-            </button>
+          </div>
         </div>
 
-        <div class="flex items-center space-x-4">
-            <!-- run-status: read by script.js to show "Running" / "Stopped" / "Error" -->
-            <span id="run-status" style="font-size:11px;color:#d1d5db;">Ready</span>
-            <!-- fps-counter: written by renderLoop() in script.js -->
-            <span style="font-size:11px;color:#a5b4fc;"><span id="fps-counter">—</span> fps</span>
-            <div class="h-6 w-px bg-indigo-400"></div>
-            <button onclick="startAll()" class="text-green-400 hover:text-green-300 text-2xl transition transform hover:scale-110" title="Run (Green Flag)">
-                <i class="fa-solid fa-flag"></i>
-            </button>
-            <button onclick="stopAll()" class="text-red-400 hover:text-red-300 text-2xl transition transform hover:scale-110" title="Stop">
-                <i class="fa-solid fa-stop-circle"></i>
-            </button>
+        <!-- Sprite Panel -->
+        <div id="sprite-panel">
+          <div id="sprite-panel-top">
+            <!-- Selected sprite properties -->
+            <div id="sprite-props" class="hidden">
+              <div class="prop-row">
+                <label>Name</label>
+                <input type="text" id="prop-name" class="prop-input" />
+              </div>
+              <div class="prop-row">
+                <label>X</label>
+                <input type="number" id="prop-x" class="prop-input prop-num" />
+                <label>Y</label>
+                <input type="number" id="prop-y" class="prop-input prop-num" />
+              </div>
+              <div class="prop-row">
+                <label>Size</label>
+                <input type="number" id="prop-size" class="prop-input prop-num" value="100" />
+                <label>Dir</label>
+                <div id="dir-wheel-container">
+                  <canvas id="dir-wheel" width="36" height="36"></canvas>
+                  <input type="number" id="prop-dir" class="prop-input prop-num" value="90" />
+                </div>
+              </div>
+              <div class="prop-row">
+                <label>Rotation</label>
+                <select id="prop-rotation" class="prop-input">
+                  <option value="all">All Around</option>
+                  <option value="leftright">Left/Right</option>
+                  <option value="none">None</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div id="sprite-list-area">
+            <div id="sprite-list"></div>
+            <div class="sprite-list-controls">
+              <button class="btn btn-sm btn-accent" id="btn-add-sprite">+ Sprite</button>
+              <button class="btn btn-sm btn-danger" id="btn-delete-sprite">Delete</button>
+            </div>
+          </div>
         </div>
+      </div>
     </div>
+  </div>
 
-    <!-- ═══════════ MAIN WORKSPACE ═══════════ -->
-    <div class="flex flex-1 overflow-hidden">
-
-        <!-- ── LEFT: Editor ── -->
-        <div id="left-pane" class="flex flex-col border-r border-gray-300 bg-gray-100" style="width: 50%;">
-
-                    <div class="flex items-center bg-gray-200 border-b border-gray-300 px-2 h-10 shrink-0">
-            
-            <button id="btn-file-manager" onclick="toggleFileManager()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 border border-indigo-300 px-3 py-1.5 rounded text-sm font-bold flex items-center shadow-sm mr-3 transition-colors">
-                <i class="fa-solid fa-folder-tree mr-2"></i> Files
-            </button>
-            
-            <div id="file-tabs" class="flex-1 flex overflow-x-auto gap-1 items-end h-full pt-1 scrollbar-hide">
-                </div>
-
-        </div>
-
-            <!-- Editor header: script.js writes to id="editor-filename" -->
-            <div style="display:flex;align-items:center;padding:3px 8px;background:#f9fafb;border-bottom:1px solid #e5e7eb;font-size:11px;gap:6px;flex-shrink:0;">
-                <i class="fa-brands fa-python" style="color:#306998;"></i>
-                <div id="editor-title" class="px-4 py-2 text-sm font-mono bg-gray-200 border-b border-gray-300">
+  <!-- Modals -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal-box">
+      <div id="modal-header">
+        <span id="modal-title"></span>
+        <button id="modal-close">×</button>
+      </div>
+      <div id="modal-body"></div>
     </div>
-            </div>
+  </div>
 
-            <!-- Code editor: script.js reads/writes id="code-editor" -->
-            <textarea id="code-editor"
-                class="code-editor flex-1 p-4 resize-none bg-white text-gray-800 focus:outline-none"
-                spellcheck="false"
-                placeholder="# Write Python here…&#10;from pyscratch import *&#10;&#10;def game_start():&#10;    pass"></textarea>
+  <!-- Context Menu -->
+  <div id="context-menu" class="hidden">
+    <div class="context-item" id="ctx-rename">Rename</div>
+    <div class="context-item ctx-danger" id="ctx-delete">Delete</div>
+  </div>
 
-            <!-- Hidden caret measure div: used by autocomplete positioning in script.js -->
-            <div id="caret-measure" class="code-editor"
-                 style="position:absolute;visibility:hidden;white-space:pre-wrap;word-wrap:break-word;pointer-events:none;z-index:-1;"></div>
+  <!-- Hidden file input -->
+  <input type="file" id="file-load-input" accept=".ps2" style="display:none" />
 
-            <!-- Console output: script.js calls consoleLog() which appends to id="console-output" -->
-            <div id="console-panel">
-                <div id="console-header">
-                    <span style="color:#ef4444;">●</span>
-                    <span style="color:#fbbf24;">●</span>
-                    <span style="color:#4ade80;">●</span>
-                    <span style="margin-left:4px;">Console</span>
-                    <div style="flex:1;"></div>
-                    <button onclick="clearConsole()" style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:10px;">Clear</button>
-                </div>
-                <div id="console-output"></div>
-            </div>
-        </div>
+  <!-- Skulpt -->
+  <script src="https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/skulpt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/skulpt@1.2.0/dist/skulpt-stdlib.js"></script>
 
-        <!-- ── RIGHT: Stage + Props + Sprites ── -->
-        <div id="resizer-h" class="w-2 bg-gray-300 hover:bg-indigo-400 cursor-col-resize flex-shrink-0 transition-colors z-20 flex flex-col justify-center items-center group">
-            <div class="w-1 h-8 bg-gray-400 group-hover:bg-white rounded-full"></div>
-        </div>
-
-        <div id="right-pane" class="flex-1 flex flex-col bg-gray-200 overflow-hidden">
-
-            <div id="top-right-pane" class="flex-1 p-4 flex flex-col relative min-h-0 overflow-hidden">
-                
-                <div class="flex justify-between items-center mb-2 shrink-0">
-                    <h2 class="font-bold text-gray-600"><i class="fa-solid fa-gamepad mr-2"></i>Stage</h2>
-                    <button onclick="toggleFullscreen()" class="text-gray-500 hover:text-gray-800" title="Fullscreen">
-                        <i class="fa-solid fa-expand"></i>
-                    </button>
-                </div>
-
-                <div class="flex-1 relative w-full min-h-0 overflow-hidden">
-                    <div class="absolute inset-0 flex items-center justify-center">
-                        
-                        <div id="stage-wrap" class="relative aspect-[4/3] max-w-full max-h-full bg-black border-4 border-gray-800 rounded-lg shadow-lg overflow-hidden canvas-container">
-                            
-                            <canvas id="game-canvas" width="480" height="360" class="w-full h-full block object-contain"></canvas>
-
-                            <div id="variable-overlay" class="absolute inset-0 p-2 flex flex-col items-start gap-2"></div>
-
-                            <div id="ask-overlay" class="hidden absolute bottom-4 left-4 right-4 bg-white p-2 rounded shadow-lg border border-indigo-200 flex flex-col gap-1">
-                                <span id="ask-prompt" class="text-sm font-bold text-indigo-600">Sprite asks...</span>
-                                <div class="flex">
-                                    <input type="text" id="ask-input" class="flex-1 border border-gray-300 rounded-l px-2 py-1 focus:outline-none focus:border-indigo-500">
-                                    <button id="ask-submit" class="bg-indigo-600 text-white px-4 rounded-r"><i class="fa-solid fa-check"></i></button>
-                                </div>
-                            </div>
-                            
-                        </div>
-
-                    </div>
-                </div>
-            </div>
-
-            <div id="resizer-v" class="h-2 bg-gray-300 border-t border-gray-300 hover:bg-indigo-400 cursor-row-resize flex-shrink-0 transition-colors z-20 flex justify-center items-center group">
-                <div class="w-8 h-1 bg-gray-400 group-hover:bg-white rounded-full"></div>
-            </div>
-
-            <div id="bottom-right-pane" class="flex flex-col bg-white shrink-0 min-h-[100px]" style="height: 256px;">
-                <style>
-                /* CSS for the right-side tabs */
-                .right-tab-btn { background: #e5e7eb; border-top: 2px solid transparent; color: #4b5563; transition: all 0.2s; }
-                .right-tab-btn:hover { background: #f3f4f6; }
-                .right-tab-btn.active { background: white; border-top-color: #4f46e5; color: #1f2937; font-weight: bold; }
-                </style>
-                
-                <div class="flex bg-gray-200 border-b border-gray-300 text-xs shrink-0">
-                    <button id="tab-props-btn" class="right-tab-btn active px-4 py-2" onclick="switchRightTab('props')">Sprites & Properties</button>
-                    <button id="tab-cos-btn" class="right-tab-btn px-4 py-2" onclick="switchRightTab('costumes')">Costumes</button>
-                </div>
-
-                <div class="flex-1 relative overflow-hidden">
-                    
-                    <div id="tab-props" class="absolute inset-0 flex flex-col bg-white">
-                        
-                        <div class="h-16 border-b border-gray-200 flex items-center px-2 space-x-2 text-sm bg-gray-50 relative z-20">
-                            <div class="flex flex-col shrink-0">
-                                <label class="text-xs font-bold text-gray-500">Sprite</label>
-                                <input type="text" id="prop-name" class="border rounded px-1 w-20 text-xs py-1" onchange="updateSpriteProp('name', this.value)">
-                            </div>
-                            <div class="flex space-x-1 shrink-0">
-                                <div class="flex flex-col w-14">
-                                    <label class="text-xs font-bold text-gray-500">X</label>
-                                    <input type="number" id="prop-x" class="border rounded px-1 text-xs py-1" onchange="updateSpriteProp('x', this.value)">
-                                </div>
-                                <div class="flex flex-col w-14">
-                                    <label class="text-xs font-bold text-gray-500">Y</label>
-                                    <input type="number" id="prop-y" class="border rounded px-1 text-xs py-1" onchange="updateSpriteProp('y', this.value)">
-                                </div>
-                            </div>
-                            <div class="flex flex-col w-14 shrink-0">
-                                <label class="text-xs font-bold text-gray-500">Size</label>
-                                <input type="number" id="prop-size" class="border rounded px-1 text-xs py-1" onchange="updateSpriteProp('size', this.value)">
-                            </div>
-
-                            <div class="relative group shrink-0">
-                                <div class="flex flex-col w-14 cursor-pointer">
-                                    <label class="text-xs font-bold text-gray-500">Direction</label>
-                                    <input type="number" id="prop-dir" class="border rounded px-1 cursor-pointer text-xs py-1" onchange="updateSpriteProp('direction', this.value)">
-                                </div>
-                                <div class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 pb-2 z-50">
-                                    <div class="w-32 h-32 bg-white rounded-full shadow-xl border-4 border-gray-200 angle-circle relative" id="angle-picker">
-                                        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                            <div class="w-1 h-1 bg-black rounded-full"></div>
-                                        </div>
-                                        <div id="angle-picker-line" class="absolute angle-line" style="top:50%;left:50%;width:40%;height:3px;background:#4f46e5;transform-origin:left center;transform:rotate(0deg);margin-top:-1.5px;border-radius:2px;"></div>
-                                    </div>
-                                </div>
-                                <div id="dir-display" class="text-xs text-center text-gray-500 mt-0.5">90°</div>
-                            </div>
-
-                            <div class="flex flex-col shrink-0">
-                                <label class="text-xs font-bold text-gray-500">Rotation</label>
-                                <select id="prop-rot-style" class="border rounded text-xs py-1 w-24" onchange="updateSpriteProp('rotationStyle', this.value)">
-                                    <option value="all">All Around</option>
-                                    <option value="left-right">Left/Right</option>
-                                    <option value="none">Don't Rotate</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="flex-1 overflow-x-auto p-3 flex items-center gap-3 bg-white" id="sprite-list">
-                        </div>
-                    </div>
-
-                    <div id="tab-costumes" class="absolute inset-0 flex flex-col hidden bg-gray-50">
-                        <div class="p-2 border-b border-gray-200 bg-gray-100 flex justify-between items-center shrink-0">
-                            <span class="font-bold text-gray-600 text-xs">Costumes</span>
-                            <button onclick="openLibraryForAdd('costume')" class="bg-indigo-100 text-indigo-700 px-2 py-1 rounded text-xs hover:bg-indigo-200 transition font-bold">
-                                <i class="fa-solid fa-plus mr-1"></i> Add
-                            </button>
-                        </div>
-                        <div id="costumes-section" class="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-        </div>
-        </div>
-    </div>
-
-    <!-- ═══════════ MODALS ═══════════ -->
-
-    <!-- Confirm: showCustomConfirm() in script.js controls this -->
-    <div id="confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white p-6 rounded-lg shadow-xl text-center w-80">
-            <h3 class="text-lg font-bold text-gray-800 mb-2">Confirm</h3>
-            <p id="confirm-msg" class="mb-6 text-gray-600">Are you sure?</p>
-            <div class="flex justify-center space-x-4">
-                <button id="confirm-yes" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition">Yes, Delete</button>
-                <button id="confirm-no" class="bg-gray-300 text-gray-800 px-4 py-2 rounded hover:bg-gray-400 transition">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Prompt: showCustomPrompt() in script.js controls this -->
-    <div id="prompt-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white p-6 rounded-lg shadow-xl text-center w-80">
-            <h3 class="text-lg font-bold text-gray-800 mb-2">Rename</h3>
-            <p id="prompt-msg" class="mb-2 text-gray-600">Enter new name:</p>
-            <input type="text" id="prompt-input" class="border rounded w-full px-2 py-1 mb-4 focus:outline-none focus:border-indigo-500 border-gray-300 text-gray-800">
-            <div class="flex justify-center space-x-4">
-                <button id="prompt-ok" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition">OK</button>
-                <button id="prompt-cancel" class="bg-gray-300 text-gray-800 px-4 py-2 rounded hover:bg-gray-400 transition">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Alert: showAlert() in script.js controls this -->
-    <div id="alert-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden" onclick="this.classList.add('hidden')">
-        <div class="bg-white p-6 rounded-lg shadow-xl text-center w-96 max-h-[80vh] overflow-y-auto">
-            <h3 class="text-lg font-bold text-indigo-600 mb-2">Notice</h3>
-            <div id="alert-msg" class="mb-6 text-gray-600 whitespace-pre-wrap text-left text-sm font-mono bg-gray-50 p-2 rounded border border-gray-200"></div>
-            <button onclick="document.getElementById('alert-modal').classList.add('hidden')" class="bg-indigo-600 text-white px-6 py-2 rounded hover:bg-indigo-700">OK</button>
-        </div>
-    </div>
-
-    <!-- Library: openLibraryForAdd() / populateLibraryGrid() in script.js controls this.
-         Items are given class "lib-item" by script.js. -->
-    <div id="library-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden" onclick="if(event.target===this)this.classList.add('hidden')">
-        <div class="bg-white rounded-lg shadow-xl w-3/4 h-3/4 flex flex-col overflow-hidden">
-            <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-                <h3 class="text-xl font-bold text-gray-800" id="library-title">Select Asset</h3>
-                <button onclick="document.getElementById('library-modal').classList.add('hidden')" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
-            </div>
-            <!-- script.js populates id="library-grid" with .lib-item divs -->
-            <div id="library-grid" class="flex-1 overflow-y-auto p-6 grid grid-cols-6 gap-3 bg-gray-50">
-                <!-- filled by populateLibraryGrid() in script.js -->
-            </div>
-        </div>
-    </div>
-
-    <!-- Help Modal -->
-    <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden" onclick="if(event.target===this)this.classList.add('hidden')">
-        <div class="bg-white rounded-lg shadow-xl w-3/4 h-3/4 flex flex-col overflow-hidden">
-            <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-                <h3 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-book mr-2"></i>Documentation</h3>
-                <button onclick="document.getElementById('help-modal').classList.add('hidden')" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
-            </div>
-            <div class="flex-1 overflow-y-auto p-6 space-y-8 bg-gray-50 text-sm text-gray-700">
-
-                <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3 font-mono text-xs">
-                    <strong>Every sprite's code starts with:</strong><br>
-                    <span class="text-indigo-700">from pyscratch import *</span><br><br>
-                    Each sprite gets its own Python file. Multiple <code>def</code> functions can run simultaneously —
-                    <code>game_start</code>, <code>on_click</code>, and <code>on_keypress</code> all run in parallel.
-                </div>
-
-                <div class="bg-white rounded-lg shadow border-l-4 border-blue-500 overflow-hidden">
-                    <div class="bg-blue-100 p-2 font-bold text-blue-900">Motion</div>
-                    <div class="p-4 space-y-3">
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">move_steps(steps)</code><p>Moves forward in current direction.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">turn(degrees)</code><p>Rotates clockwise.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">go_to(x, y)</code> or <code class="bg-gray-100 px-1 rounded font-bold">go_to("random")</code><p>Teleports sprite.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">glide_to(x, y, secs)</code><p>Smoothly moves over time.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">point_towards(x, y)</code><p>Aims at coords, sprite name, "mouse pointer", or a degree number.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">set_x(n) / set_y(n) / change_x(n) / change_y(n)</code></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">get_x() / get_y() / get_direction()</code></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">on_edge()</code> &amp; <code class="bg-gray-100 px-1 rounded font-bold">bounce()</code><p>Call on_edge() first, then bounce() to reflect direction.</p></div>
-                    </div>
-                </div>
-
-                <div class="bg-white rounded-lg shadow border-l-4 border-purple-500 overflow-hidden">
-                    <div class="bg-purple-100 p-2 font-bold text-purple-900">Looks</div>
-                    <div class="p-4 space-y-3">
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">say(message, secs=2)</code><p>Speech bubble, pauses execution.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">set_costume(name) / next_costume()</code></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">set_stage(name) / next_stage()</code></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">set_size(%) / change_size(n) / show() / hide()</code></div>
-                    </div>
-                </div>
-
-                <div class="bg-white rounded-lg shadow border-l-4 border-yellow-500 overflow-hidden">
-                    <div class="bg-yellow-100 p-2 font-bold text-yellow-900">Events (define these functions)</div>
-                    <div class="p-4 space-y-3">
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">def game_start():</code><p>Runs when ▶ is pressed.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">def on_click():</code><p>Runs when this sprite is clicked.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">def on_keypress(key):</code><p>key is "space", "up", "a", etc.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">broadcast(msg) / def broadcast_receive(msg):</code></div>
-                    </div>
-                </div>
-
-                <div class="bg-white rounded-lg shadow border-l-4 border-amber-500 overflow-hidden">
-                    <div class="bg-amber-100 p-2 font-bold text-amber-900">Control</div>
-                    <div class="p-4 space-y-3">
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">wait(secs)</code><p>Pauses this function (other functions keep running).</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">stop()</code><p>Stops everything.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">while True: / if / for</code><p>Standard Python — all work natively.</p></div>
-                    </div>
-                </div>
-
-                <div class="bg-white rounded-lg shadow border-l-4 border-cyan-500 overflow-hidden">
-                    <div class="bg-cyan-100 p-2 font-bold text-cyan-900">Sensing</div>
-                    <div class="p-4 space-y-3">
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">touching("SpriteName")</code> or <code class="bg-gray-100 px-1 rounded font-bold">touching("mouse pointer")</code></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">distance_to("SpriteName")</code></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">key_pressed("space")</code><p>True while key is held.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">ask("question")</code><p>Returns user's answer as a string.</p></div>
-                    </div>
-                </div>
-
-                <div class="bg-white rounded-lg shadow border-l-4 border-orange-500 overflow-hidden">
-                    <div class="bg-orange-100 p-2 font-bold text-orange-900">Variables &amp; Random</div>
-                    <div class="p-4 space-y-3">
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">display_variable("score", score)</code><p>Shows a variable monitor on stage.</p></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">hide_variable("score")</code></div>
-                        <div><code class="bg-gray-100 px-1 rounded font-bold">import random</code><p>Standard Python random works: <code>random.randint(1, 10)</code></p></div>
-                    </div>
-                </div>
-
-                <div class="bg-gray-800 rounded-lg p-4 font-mono text-xs text-green-300">
-                    <div class="text-gray-400 mb-2"># Example: bouncing ball</div>
-                    from pyscratch import *<br>
-                    import random<br><br>
-                    def game_start():<br>
-                    &nbsp;&nbsp;&nbsp;&nbsp;set_size(50)<br>
-                    &nbsp;&nbsp;&nbsp;&nbsp;go_to(0, 0)<br>
-                    &nbsp;&nbsp;&nbsp;&nbsp;while True:<br>
-                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;move_steps(4)<br>
-                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;if on_edge():<br>
-                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;bounce()<br>
-                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;wait(0.016)<br><br>
-                    def on_click():<br>
-                    &nbsp;&nbsp;&nbsp;&nbsp;go_to("random")<br>
-                </div>
-
-            </div>
-        </div>
-    </div>
-
-    <!-- Autocomplete popup: must be outside overflow:hidden containers so it can float freely -->
-    <div id="autocomplete-list"></div>
-
-    <!-- ═══════════ SCRIPT ═══════════ -->
-    <script src="script.js"></script>
-
+  <!-- App scripts -->
+  <script src="js/utils.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/python-api.js"></script>
+  <script src="js/scheduler.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/costumes.js"></script>
+  <script src="js/project.js"></script>
+  <script src="js/publish.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
